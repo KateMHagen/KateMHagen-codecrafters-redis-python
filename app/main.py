@@ -8,7 +8,15 @@ def main():
     
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
     client, addr = server_socket.accept()  # wait for client
-    client.send(b"+PONG\r\n")
-
+   
+    while True:
+        # get data, only acceppt bytes of 1024
+        data = client.recv(1024).decode()
+        # if no data is recieved break
+        if not data:
+            break
+        # send data to client
+        client.send(b"+PONG\r\n")
+    
 if __name__ == "__main__":
     main()
