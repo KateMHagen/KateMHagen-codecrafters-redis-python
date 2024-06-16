@@ -8,11 +8,8 @@ def main():
     pong = "+PONG\r\n"
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
     server_socket.accept() # wait for client
-    client, addr = server_socket.accept()
-
-    with client:
-        client.recv(1024)
-        client.send(pong.encode())
+    client, addr = server_socket.accept()    
+    client.send(pong.encode())
 
 if __name__ == "__main__":
     main()
