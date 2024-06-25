@@ -60,6 +60,9 @@ async def handle_client(reader, writer):
             else:
                 response = b"$-1\r\n"
             writer.write(response)
+        elif command == 'INFO':
+            response = b'$11\r\nrole:master\r\n'
+            writer.write(response)
         await writer.drain() # Ensure data is written to client
 
 async def expire_key(key, expiry):
