@@ -1,4 +1,5 @@
 import asyncio
+import argparse
 
 dict = {}
 expiry_of_tasks = {}
@@ -40,9 +41,8 @@ async def handle_client(reader, writer):
                 response = f"${len(parse[1])}\r\n{parse[1].decode()}\r\n".encode()
                 writer.write(response)
         elif command == 'SET':
-            
             expiry = None
-            
+            # Handle if key has an expiry
             if len(parse) > 3 and parse[3] == b'px':
                 expiry = int(parse[4])
         
@@ -65,14 +65,20 @@ async def handle_client(reader, writer):
 async def expire_key(key, expiry):
     # Convert milliseconds to seconds
     await asyncio.sleep(expiry / 1000)
+    # Removes key if it exists, returns None if it doesn.t
     dict.pop(key, None)
     expiry_of_tasks.pop(key, None)
+    
 
 async def main():
     # You can use print statements as follows for debugging, they'll be visible when running tests.
     print("Logs from your program will appear here!")
-    # Start TCP server listening on localhost and port 6379
-    server_socket = await asyncio.start_server(handle_client, "localhost", 6379)
+
+    # Start TCP server listening on localhost and port specified or default to 6379 if port is not specified
+    parser = argparse.ArgumentParser("A Redis server written in Python")
+    parser.add_argument('--port', type=int, default=6379)
+    
+    server_socket = await asyncio.start_server(handle_client, "localhost", parser.parse_args().port)
  
     async with server_socket:
         await server_socket.serve_forever() # Serve clients forever
