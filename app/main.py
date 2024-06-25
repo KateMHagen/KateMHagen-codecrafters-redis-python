@@ -30,7 +30,6 @@ async def handle_client(reader, writer):
         parse = parseResp(data)
         # Decode first command from parsed RESP data
         command = parse[0].decode()
-     
         if command == 'PING':
             writer.write(b"+PONG\r\n")
         elif command == 'ECHO':
@@ -38,7 +37,15 @@ async def handle_client(reader, writer):
             if len(parse) > 1:
                 response = f"${len(parse[1])}\r\n{parse[1].decode()}\r\n".encode()
                 writer.write(response)
-      
+        elif command == 'SET':
+            dict = {
+                parse[1]: parse[2]    
+            }
+            response = "+OK\r\n".encode()
+            writer.write(response)
+        elif command == 'GET':
+            response = f"${len(dict[parse[1]])}\r\n{dict[parse[1]].decode()}\r\n".encode()
+            writer.write(response)
         await writer.drain() # Ensure data is written to client
 
 
