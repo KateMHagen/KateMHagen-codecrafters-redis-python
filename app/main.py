@@ -80,6 +80,7 @@ async def expire_key(key, expiry):
     
 async def connect_to_master(master_host, master_port):
     """
+    Send handshake.
     Connects to the master server if the current server is a replica.
     The replica sends a PING command to the master server, then sends REPLCONF twice to the master,
     and lastly a PSYNC to the master.
@@ -91,7 +92,8 @@ async def connect_to_master(master_host, master_port):
     )
     await reader.read(1024)
     writer.write(b'*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n')
-    
+    await reader.read(1024)
+    writer.write(b'*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n')
     await writer.drain()
     
 
