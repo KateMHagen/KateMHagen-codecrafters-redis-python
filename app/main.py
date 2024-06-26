@@ -35,14 +35,14 @@ async def handle_client(reader, writer):
         # Decode first command from parsed RESP data
         command = parse[0].decode()
 
-        if command == 'PING':
+        if command == 'PING': # Respond to PING command
             writer.write(b'+PONG\r\n')
-        elif command == 'ECHO':
+        elif command == 'ECHO': # Respond to ECHO command
             # The tester will expect to receive $3\r\nhey\r\n as a response (that's the string hey encoded as a RESP bulk string.
             if len(parse) > 1:
                 response = f"${len(parse[1])}\r\n{parse[1].decode()}\r\n".encode()
                 writer.write(response)
-        elif command == 'SET':
+        elif command == 'SET': # Respond to SET command
             expiry = None
             # Handle if key has an expiry
             if len(parse) > 3 and parse[3] == b'px':
@@ -56,22 +56,27 @@ async def handle_client(reader, writer):
                 expiry_of_tasks[parse[1]] = asyncio.create_task(expire_key(parse[1], expiry))
             response = "+OK\r\n".encode()
             writer.write(response)
-        elif command == 'GET':
+        elif command == 'GET': # Respond to GET command
             if parse[1] in dict:
                 response = f"${len(dict[parse[1]])}\r\n{dict[parse[1]].decode()}\r\n".encode()
             else:
                 response = b"$-1\r\n"
             writer.write(response)
-        elif command == 'INFO':
+        elif command == 'INFO': # Respond to INFO replication command
             if is_slave:
                 response = b'$10\r\nrole:slave\r\n'
             else:
                 response = b'$89\r\nrole:master\r\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\nmaster_repl_offset:0\r\n'
             writer.write(response)
-        elif command == 'REPLCONF':
+        elif command == 'REPLCONF': # Respond to REPLCONF command
             writer.write(b'+OK\r\n')
-        elif command == 'PSYNC':
+        elif command == 'PSYNC': # Respond to PSYNC command
             writer.write(b'+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n')
+            # Send empty RDB file
+            rdb_hex = '524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2'
+            rdb_content = bytes.fromhex(rdb_hex)
+            rdb_data = f'${len(rdb_content)}\r\n'.encode()
+            writer.write(rdb_data + rdb_content)
         await writer.drain() # Ensure data is written to client
 
 async def expire_key(key, expiry):
@@ -96,7 +101,10 @@ async def connect_to_master(master_host, master_port):
     await reader.read(1024)
     writer.write(b'*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n')
     await reader.read(1024)
+    # PSYNC ? -1 is the replicas way of telling the master that it doesn't have any data yet, and
+    # needs to be fully resynchronized
     writer.write(b'*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n')
+    
     await writer.drain()
     
 
