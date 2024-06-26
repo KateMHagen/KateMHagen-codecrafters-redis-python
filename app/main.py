@@ -70,7 +70,8 @@ async def handle_client(reader, writer):
             writer.write(response)
         elif command == 'REPLCONF':
             writer.write(b'+OK\r\n')
-            
+        elif command == 'PSYNC':
+            writer.write(b'+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n')
         await writer.drain() # Ensure data is written to client
 
 async def expire_key(key, expiry):
