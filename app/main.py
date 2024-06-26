@@ -1,6 +1,5 @@
 import asyncio
 import argparse
-import socket
 
 dict = {}
 expiry_of_tasks = {}
@@ -69,6 +68,9 @@ async def handle_client(reader, writer):
             else:
                 response = b'$89\r\nrole:master\r\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\nmaster_repl_offset:0\r\n'
             writer.write(response)
+        elif command == 'REPLCONF':
+            writer.write(b'+OK\r\n')
+            
         await writer.drain() # Ensure data is written to client
 
 async def expire_key(key, expiry):
