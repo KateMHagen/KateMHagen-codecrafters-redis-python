@@ -81,12 +81,17 @@ async def expire_key(key, expiry):
 async def connect_to_master(master_host, master_port):
     """
     Connects to the master server if the current server is a replica.
-    Sends a PING command to the master server and prints the response.
+    The replica sends a PING command to the master server, then sends REPLCONF twice to the master,
+    and lastly a PSYNC to the master.
     """
     reader, writer = await asyncio.open_connection(master_host, master_port)
     writer.write(b'*1\r\n$4\r\nPING\r\n')
-    writer.write(f'*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{master_port}\r\n'.encode())
+    await reader.read(1024)
+    writer.write(b'*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n'
+    )
+    await reader.read(1024)
     writer.write(b'*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n')
+    
     await writer.drain()
     
 
