@@ -1,5 +1,6 @@
 import asyncio
 import argparse
+import socket
 
 dict = {}
 expiry_of_tasks = {}
@@ -34,8 +35,9 @@ async def handle_client(reader, writer):
         parse = parse_resp(data)
         # Decode first command from parsed RESP data
         command = parse[0].decode()
+
         if command == 'PING':
-            writer.write(b"+PONG\r\n")
+            writer.write(b'+PONG\r\n')
         elif command == 'ECHO':
             # The tester will expect to receive $3\r\nhey\r\n as a response (that's the string hey encoded as a RESP bulk string.
             if len(parse) > 1:
@@ -76,6 +78,15 @@ async def expire_key(key, expiry):
     dict.pop(key, None)
     expiry_of_tasks.pop(key, None)
     
+async def connect_to_master(master_host, master_port):
+    """
+    Connects to the master server if the current server is a replica.
+    Sends a PING command to the master server and prints the response.
+    """
+    reader, writer = await asyncio.open_connection(master_host, master_port)
+    writer.write(b'*1\r\n$4\r\nPING\r\n')
+    await writer.drain()
+    
 
 async def main():
     # You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -86,9 +97,16 @@ async def main():
     parser.add_argument('--port', type=int, default=6379)
     parser.add_argument('--replicaof', type=ascii)
     
-    server_socket = await asyncio.start_server(handle_client, "localhost", parser.parse_args().port)
-    
-    is_slave = True if parser.parse_args().replicaof else False
+    args = parser.parse_args()
+   
+    if args.replicaof:
+        is_slave = True
+        master_host = parser.parse_args().replicaof[1:10]
+        master_port = parser.parse_args().replicaof[11:15]
+        await connect_to_master(master_host, master_port)
+       
+    server_socket = await asyncio.start_server(handle_client, "localhost", args.port)
+
     async with server_socket:
         await server_socket.serve_forever() # Serve clients forever
     
