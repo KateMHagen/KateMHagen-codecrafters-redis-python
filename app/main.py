@@ -63,9 +63,9 @@ async def handle_client(reader, writer):
             writer.write(response)
         elif command == 'INFO':
             if is_slave:
-                response = b'$10\r\nrole:slave\r\n$40\r\master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n$1\r\master_repl_offset:0\r\n'
+                response = b'$10\r\nrole:slave\r\n'
             else:
-                response = b'$11\r\nrole:master\r\n$40\r\master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n$1\r\master_repl_offset:0\r\n'
+                response = b'$89\r\nrole:master\r\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\nmaster_repl_offset:0\r\n'
             writer.write(response)
         await writer.drain() # Ensure data is written to client
 
