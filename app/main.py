@@ -3,6 +3,7 @@ import argparse
 
 dict = {}
 expiry_of_tasks = {}
+is_slave = False
 def parse_resp(data):
     if data.startswith(b'*'):
         # Split data in parts based on \r\n
@@ -61,7 +62,10 @@ async def handle_client(reader, writer):
                 response = b"$-1\r\n"
             writer.write(response)
         elif command == 'INFO':
-            response = b'$11\r\nrole:master\r\n'
+            if is_slave:
+                response = b'$10\r\nrole:slave\r\n'
+            else:
+                response = b'$11\r\nrole:master\r\n'
             writer.write(response)
         await writer.drain() # Ensure data is written to client
 
@@ -76,13 +80,15 @@ async def expire_key(key, expiry):
 async def main():
     # You can use print statements as follows for debugging, they'll be visible when running tests.
     print("Logs from your program will appear here!")
-
+    global is_slave
     # Start TCP server listening on localhost and port specified or default to 6379 if port is not specified
     parser = argparse.ArgumentParser("A Redis server written in Python")
     parser.add_argument('--port', type=int, default=6379)
+    parser.add_argument('--replicaof', type=ascii)
     
     server_socket = await asyncio.start_server(handle_client, "localhost", parser.parse_args().port)
- 
+    
+    is_slave = True if parser.parse_args().replicaof else False
     async with server_socket:
         await server_socket.serve_forever() # Serve clients forever
     
