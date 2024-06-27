@@ -4,6 +4,8 @@ import argparse
 dict = {}
 expiry_of_tasks = {}
 is_slave = False
+replicas = []
+
 def parse_resp(data):
     if data.startswith(b'*'):
         # Split data in parts based on \r\n
@@ -27,6 +29,10 @@ def parse_resp(data):
    
 
 async def handle_client(reader, writer):
+    global replicas
+    
+    
+
     while True:
         # Read client data
         data = await reader.read(1024)
@@ -34,7 +40,7 @@ async def handle_client(reader, writer):
         parse = parse_resp(data)
         # Decode first command from parsed RESP data
         command = parse[0].decode()
-
+      
         if command == 'PING': # Respond to PING command
             writer.write(b'+PONG\r\n')
         elif command == 'ECHO': # Respond to ECHO command
@@ -54,8 +60,15 @@ async def handle_client(reader, writer):
                 if parse[1] in expiry_of_tasks:
                     expiry_of_tasks[parse[1]].cancel()
                 expiry_of_tasks[parse[1]] = asyncio.create_task(expire_key(parse[1], expiry))
+            
+            # Propagating write command from master to replica
+            for replica in replicas:
+                replica.write(data)
+                await replica.drain()
+            
             response = "+OK\r\n".encode()
             writer.write(response)
+          
         elif command == 'GET': # Respond to GET command
             if parse[1] in dict:
                 response = f"${len(dict[parse[1]])}\r\n{dict[parse[1]].decode()}\r\n".encode()
@@ -71,6 +84,7 @@ async def handle_client(reader, writer):
         elif command == 'REPLCONF': # Respond to REPLCONF command
             writer.write(b'+OK\r\n')
         elif command == 'PSYNC': # Respond to PSYNC command
+            replicas.append(writer)
             writer.write(b'+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n')
             # Send empty RDB file
             rdb_hex = '524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2'
