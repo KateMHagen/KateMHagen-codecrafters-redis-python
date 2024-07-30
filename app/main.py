@@ -1,3 +1,4 @@
+#XV6
 from collections import defaultdict
 from dataclasses import dataclass
 import time
@@ -21,10 +22,106 @@ replica_port = None
 replica_reader = None
 master_port = None
 
+def parse_resp(data):
+    parts = data.split(b'\r\n')
+    commands = []
+    total_parsed_bytes = 0
+    i = 0
+
+    while i < len(parts):
+        part = parts[i]
+
+        if part.startswith(b'+'):  # Simple string
+            commands.append(part[1:].decode('utf-8'))
+            total_parsed_bytes += len(part) + 2  # +2 for '\r\n'
+            i += 1
+            
+        elif part.startswith(b'$'):  # Bulk string
+            length_str = part[1:]
+            if length_str:
+                length = int(length_str)
+                # Ensure there are enough parts remaining for the bulk string and its terminator
+                if i + 1 < len(parts):
+                    total_parsed_bytes += len(part) + 2  # +2 for '\r\n'
+                    i += 1
+                    if len(parts[i]) == length:  # Check if the length matches
+                        element = parts[i].decode('utf-8', errors='ignore')
+                        commands.append(element)
+                        total_parsed_bytes += len(parts[i]) + 2  # +2 for '\r\n'
+                        i += 1
+                    else:
+                        print(f"Invalid length for bulk string at parts[{i}], expected {length} but got {len(parts[i])}")
+                        break  # Exit since we can't parse the message completely
+                else:
+                    print("Not enough parts for bulk string")
+                    break  # Exit if we don't have enough data
+            else:
+                print(f"parts[{i}] = {parts[i]}, length is empty")
+                i += 1
+                
+        elif part.startswith(b'*'):  # Array
+            num_str = part[1:]
+            if num_str:
+                num_elements = int(num_str)
+                total_parsed_bytes += len(part) + 2  # +2 for '\r\n'
+                i += 1
+                elements = []
+                for _ in range(num_elements):
+                    if i < len(parts) and parts[i].startswith(b'$'):
+                        length_str = parts[i][1:]
+                        if length_str:
+                            length = int(length_str)
+                            total_parsed_bytes += len(parts[i]) + 2  # +2 for '\r\n'
+                            i += 1
+                            if i < len(parts) and len(parts[i]) == length:  # Check if the length matches
+                                element = parts[i].decode('utf-8', errors='ignore')
+                                elements.append(element)
+                                total_parsed_bytes += len(parts[i]) + 2  # +2 for '\r\n'
+                                i += 1
+                            else:
+                                print(f"Invalid length for bulk string at parts[{i}], expected {length} but got {len(parts[i])}")
+                                break  # Exit since we can't parse the message completely
+                        else:
+                            print(f"parts[{i}] = {parts[i]}, length is empty")
+                            i += 1
+                    else:
+                        print(f"Invalid or missing $ prefix at parts[{i}]")
+                        break  # Exit since we can't parse the message completely
+                commands.append(elements)
+            else:
+                print(f"parts[{i}] = {parts[i]}, num_elements is empty")
+                i += 1
+                
+        else:
+            print(f"Unknown prefix at parts[{i}]")
+            total_parsed_bytes += len(part) + 2  # +2 for '\r\n'
+            i += 1
+
+    # Determine how much data to keep for future calls
+    if i < len(parts):
+        remaining_data = b'\r\n'.join(parts[i:])  # Keep unprocessed parts
+    else:
+        remaining_data = b''  # No remaining data
+
+    print("COMMANDS: ", commands)
+    return commands, total_parsed_bytes, remaining_data
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 async def handle_message(data, writer):
     global master_port, port, replica_port
-    print("from handle client")
+    print("from handle msg")
     print("data: " + data)
   
     if data:
@@ -92,10 +189,12 @@ async def handle_message(data, writer):
                     writer.write("$-1\r\n".encode())
                     await writer.drain()
             elif "REPLCONF" in cmd: # Respond to REPLCONF command
+                print(data_split)
                 if "listening-port" in data_split:
                     replica_port = data_split[6]
                 writer.write('+OK\r\n'.encode())
                 await writer.drain()
+                
             elif "PSYNC" in cmd:
                 global replica_writer
                 fullresync = '+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n'
@@ -115,22 +214,28 @@ async def handle_message(data, writer):
                 await propagate_commands(data)
 
 async def propagate_commands(data):
-        global replica_writers
-        if data:
-            for writer in replica_writers:
-                if writer.is_closing():
-                    break
-                writer.write(data.encode())
-                await writer.drain()
+    print("In propagate commands")
+    global replica_writers
+    if data:
+        for writer in replica_writers:
+            if writer.is_closing():
+                break
+            writer.write(data.encode())
+            await writer.drain()
+    print(replica_writers)
+            
   
 async def handle_client(reader, writer):
+    print("from handle client")
     while True:
         data = await reader.read(1024)
         decoded_msg = data.decode()
+        
         if not decoded_msg:
             break
         await handle_message(decoded_msg, writer)
     writer.close()
+    await writer.wait_closed()
 
 async def handle_handshake(reader, writer):
     """
@@ -141,44 +246,127 @@ async def handle_handshake(reader, writer):
     """
     print('from run handshake')
     replicas.append(writer)
-    # reader, writer = await asyncio.open_connection(master_host, master_port)
+
+    # Send PING command
     writer.write(b'*1\r\n$4\r\nPING\r\n')
-    await reader.read(1024)
-
-    writer.write(b'*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n'
-    )
-    await reader.read(1024)
-
-    writer.write(b'*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n')
-    await reader.read(1024)
-    # PSYNC ? -1 is the replicas way of telling the master that it doesn't have any data yet, and
-    # needs to be fully resynchronized
-    writer.write(b'*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n')
-    replicas.append(writer)
-    # For RDB file
-    await reader.read(1024)
-    await reader.read(1024)
-    print("Recieved RDB file. Handshake complete")
     await writer.drain()
+    await reader.read(1024)
+
+    # Send REPLCONF for listening-port
+    writer.write(b'*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n')
+    await writer.drain()
+    await reader.read(1024)
+
+    # Send REPLCONF for capabilities
+    writer.write(b'*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n')
+    await writer.drain()
+    await reader.read(1024)
+
+    # PSYNC command to indicate full resynchronization
+    writer.write(b'*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n')
+    await writer.drain()
+
+    print("Waiting for RDB file...")
+
+    # Flag to indicate handshake completion
+    handshake_complete = True
+
+    remaining_data = b''
+    while True:
+        data = await reader.read(1024)
+        if not data:
+            break
+
+        if handshake_complete:
+            print("Received RDB file. Handshake complete")
+            
+            # Combine any remaining data from the previous parse with new data
+            combined_data = remaining_data + data
+            
+            while combined_data:
+                commands, total_parsed_bytes, remaining_data = parse_resp(combined_data)
+                print(f"Received from master: {commands}")
+                
+                # Update combined_data for the next iteration
+                combined_data = combined_data[total_parsed_bytes:]
+
+                if isinstance(commands, list):
+                    print('hello1')
+                    it = iter(commands)
+                    for command in it:
+                        print(f'this is command: {command}')
+                        
+                        if isinstance(command, list) and command and command[0] == "SET" and len(command) == 3:
+                            print('im in set')
+                            key = command[1]
+                            value = command[2]
+                            handle_set_command(key, value)
+                        elif command == "SET":
+                            try:
+                                key = next(it)
+                                value = next(it)
+                                handle_set_command(key, value)
+                            except StopIteration:
+                                print("Error: Not enough arguments for SET command.")
+                                
+                        elif command == "GETACK" or "GETACK" in command:
+                            print('im in getack')
+                            writer.write(b"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n")
+                            await writer.drain()
+                        
+                else:
+                    print(f"Invalid command format: {commands}")
+
+        else:
+            print("Handshake not complete, skipping data processing.")
+
+        
+
+
+    # if b"GETACK" in test1 or test2:
+    #     writer.write("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".encode())
+    #     await writer.drain()
+    
+def handle_set_command(key, value):
+   
+    print(f"Handling SET command: key = {key}, value = {value}")
+    # Store the value in the defaultdict
+    store[key] = Item(value=value)
+    print(f"Set {key} to {value}")
+    print(f'this is store: {store}')
+
+
+
+
 
 async def connect_master(replica):
     host, port = replica.split(" ")
     reader_writer = await asyncio.open_connection(host, port)
     reader = reader_writer[0]
     writer = reader_writer[1]
+    
     await handle_handshake(reader, writer)
 
-    while True:
-        data = await reader.read(1024)
-        if not data:
-            break
-        msg1 = data.decode()
-        raw_reqs = list(msg1.split("*"))[1:]
-        for message in raw_reqs:
-            message = "*" + message
-            await handle_message(message, writer)
-    writer.close()
-    await writer.wait_closed()
+    print("back in connect master")
+   
+    # while True:
+        
+    #     print("connect master loop")
+    #     data = await reader.read(1024)
+    #     print(data)
+        
+    #     if not data:
+    #         print("No data")
+    #         break
+    #     msg1 = data.decode()
+    #     raw_reqs = list(msg1.split("*"))[1:]
+    #     print(f"raw reqs: {raw_reqs}")
+    #     for message in raw_reqs:
+    #         print(message)
+    #         message = "*" + message
+    #         await handle_message(message, writer)
+    # writer.close()
+    # await writer.wait_closed()
 
 async def main():
     # You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -206,3 +394,4 @@ async def main():
         
 if __name__ == "__main__":
     asyncio.run(main())
+
