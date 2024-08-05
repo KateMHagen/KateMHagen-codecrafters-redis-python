@@ -1,4 +1,3 @@
-#XV6
 from collections import defaultdict
 from dataclasses import dataclass
 import time
@@ -106,20 +105,6 @@ def parse_resp(data):
     print(f"Parsed commands: {commands}, Total parsed bytes: {total_parsed_bytes}, Remaining data: {remaining_data}")
 
     return commands, total_parsed_bytes, remaining_data
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 async def handle_message(data, writer):
@@ -280,7 +265,7 @@ async def handle_handshake(reader, writer):
             print("Received RDB file. Handshake complete")
         # Combine any remaining data from the previous parse with new data
             combined_data = remaining_data + data
-            # DENNA LOOPEN BLIR INFINITE I NOKKEN CASES
+            # Replicas should update their offset to account for all commands propagated from the master, including PING and REPLCONF itself.
             while combined_data:
                 # set_received = False
                 print(f'this is combined data: {combined_data}')
@@ -324,15 +309,8 @@ async def handle_handshake(reader, writer):
                                 set_received = True
                             print(f'offset after updating if it is updated: {total_offset}')
                             print(f'parsed bytes: {total_parsed_bytes}')
-                        # elif command == "SET":
-                        #     print("im in set 2")
-                        #     key = command[1]
-                        #     value = command[2]
-                        #     handle_set_command(key, value)
-                        #     total_offset += total_parsed_bytes
-                        #     print(f'peepee: {total_offset}')
                          
-                        
+                        # The offset should only include number of bytes of commands processed before receiving the current REPLCONF GETACK command.
                         elif command == "GETACK" or "GETACK" in command:
                             print('im in getack')
                             if not getack_received:
@@ -355,6 +333,10 @@ async def handle_handshake(reader, writer):
                             print(total_offset)
                             print(total_parsed_bytes)
                             # Silently process PING
+                        
+                        elif command == "WAIT" or "WAIT" in command:
+                            writer.write(":0\r\n".encode())
+                            await writer.drain()
                         
                     
                     
@@ -399,24 +381,7 @@ async def connect_master(replica):
 
     print("back in connect master")
    
-    # while True:
-        
-    #     print("connect master loop")
-    #     data = await reader.read(1024)
-    #     print(data)
-        
-    #     if not data:
-    #         print("No data")
-    #         break
-    #     msg1 = data.decode()
-    #     raw_reqs = list(msg1.split("*"))[1:]
-    #     print(f"raw reqs: {raw_reqs}")
-    #     for message in raw_reqs:
-    #         print(message)
-    #         message = "*" + message
-    #         await handle_message(message, writer)
-    # writer.close()
-    # await writer.wait_closed()
+   
 
 async def main():
     # You can use print statements as follows for debugging, they'll be visible when running tests.
