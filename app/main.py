@@ -277,7 +277,8 @@ async def handle_handshake(reader, writer):
                 if isinstance(commands, list):
                     print('hello1')
                     print(commands)
-                    for command in commands:
+                    cmds = iter(commands)
+                    for command in cmds:
                         print(f'this is command: {command}')
                         print(f"curr total offset: {total_offset}")
                         
@@ -290,7 +291,7 @@ async def handle_handshake(reader, writer):
                             
                             getack_found = False
 
-                            for cmd in commands:
+                            for cmd in cmds:
                                 if cmd == "GETACK" or "GETACK" in cmd:
                                     getack_found = True
                                     print("GETACK is in command")
@@ -304,6 +305,11 @@ async def handle_handshake(reader, writer):
                             print(f'offset after updating if it is updated: {total_offset}')
                             print(f'parsed bytes: {total_parsed_bytes}')
                          
+                        elif command == "SET":
+                            key = next(cmds)
+                            value = next(cmds)
+                            handle_set_command(key, value)
+                            total_offset += total_parsed_bytes
                         # The offset should only include number of bytes of commands processed before receiving the current REPLCONF GETACK command.
                         elif command == "GETACK" or "GETACK" in command:
                             print('im in getack')
