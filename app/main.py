@@ -22,7 +22,9 @@ replica_reader = None
 master_port = None
 
 def parse_resp(data):
+    print(f' this is input data {data}')
     parts = data.split(b'\r\n')
+    print(f'parts: {parts}')
     commands = []
     total_parsed_bytes = 0
     command_bytes = 0
@@ -49,8 +51,10 @@ def parse_resp(data):
                     command_bytes += len(parts[i]) + 2  # +2 for '\r\n'
                     i += 1
                 else:
+                    print(f"Invalid length for bulk string at parts[{i}], expected {length} but got {len(parts[i])}")
                     break
             else:
+                print(f"parts[{i}] = {parts[i]}, length is empty")
                 i += 1
                 
         elif part.startswith(b'*'):  # Array
@@ -60,10 +64,9 @@ def parse_resp(data):
                 command_bytes += len(part) + 2  # +2 for '\r\n'
                 i += 1
                 elements = []
-                while num_elements > 0 and i < len(parts):
-                    part = parts[i]
-                    if part.startswith(b'$'):
-                        length_str = part[1:]
+                for _ in range(num_elements):
+                    if i < len(parts) and parts[i].startswith(b'$'):
+                        length_str = parts[i][1:]
                         if length_str:
                             length = int(length_str)
                             command_bytes += len(parts[i]) + 2  # +2 for '\r\n'
@@ -71,30 +74,40 @@ def parse_resp(data):
                             if i < len(parts) and len(parts[i]) == length:
                                 element = parts[i].decode('utf-8', errors='ignore')
                                 elements.append(element)
+                                print(f'dis is elements: {elements}')
                                 command_bytes += len(parts[i]) + 2  # +2 for '\r\n'
                                 i += 1
-                                num_elements -= 1
-                            else:
-                                break
+                            # else:
+                            #     print(f"Invalid length for bulk string at parts[{i}], expected {length} but got {len(parts[i])}")
+                            #     break
                         else:
+                            # print(f"parts[{i}] = {parts[i]}, length is empty")
                             i += 1
-                    else:
-                        break
+                    # else:
+                    #     print(f"Invalid or missing $ prefix at parts[{i}]")
+                    #     break
                 commands.append(elements)
             else:
+                # print(f"parts[{i}] = {parts[i]}, num_elements is empty")
                 i += 1
                 
         else:
+            # print(f"Unknown prefix at parts[{i}]")
             i += 1
 
     total_parsed_bytes = command_bytes
 
+    # Determine how much data to keep for future calls
     if i < len(parts):
         remaining_data = b'\r\n'.join(parts[i:])  # Keep unprocessed parts
     else:
         remaining_data = b''  # No remaining data
 
+    print(f"Parsed commands: {commands}, Total parsed bytes: {total_parsed_bytes}, Remaining data: {remaining_data}")
+
     return commands, total_parsed_bytes, remaining_data
+
+
 
 
 
@@ -277,8 +290,8 @@ async def handle_handshake(reader, writer):
                 if isinstance(commands, list):
                     print('hello1')
                     print(commands)
-                    cmds = iter(commands)
-                    for command in cmds:
+                    
+                    for command in commands:
                         print(f'this is command: {command}')
                         print(f"curr total offset: {total_offset}")
                         
@@ -291,7 +304,7 @@ async def handle_handshake(reader, writer):
                             
                             getack_found = False
 
-                            for cmd in cmds:
+                            for cmd in commands:
                                 if cmd == "GETACK" or "GETACK" in cmd:
                                     getack_found = True
                                     print("GETACK is in command")
@@ -306,8 +319,9 @@ async def handle_handshake(reader, writer):
                             print(f'parsed bytes: {total_parsed_bytes}')
                          
                         elif command == "SET":
-                            key = next(cmds)
-                            value = next(cmds)
+                            key = commands[1]
+                            value = commands[2]
+                            print(key,value)
                             handle_set_command(key, value)
                             total_offset += total_parsed_bytes
                         # The offset should only include number of bytes of commands processed before receiving the current REPLCONF GETACK command.
