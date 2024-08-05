@@ -23,7 +23,9 @@ replica_reader = None
 master_port = None
 
 def parse_resp(data):
+    print(f' this is input data {data}')
     parts = data.split(b'\r\n')
+    print(f'parts: {parts}')
     commands = []
     total_parsed_bytes = 0
     command_bytes = 0
@@ -278,12 +280,18 @@ async def handle_handshake(reader, writer):
             print("Received RDB file. Handshake complete")
         # Combine any remaining data from the previous parse with new data
             combined_data = remaining_data + data
+            # DENNA LOOPEN BLIR INFINITE I NOKKEN CASES
             while combined_data:
                 # set_received = False
                 print(f'this is combined data: {combined_data}')
                 commands, total_parsed_bytes, remaining_data = parse_resp(combined_data)
                 print(f"Received from master: {commands}")
                 print(f"Total parsed bytes: {total_parsed_bytes}")
+
+                if total_parsed_bytes == 0:
+                    print("Total parsed bytes is 0, breaking the loop")
+                    break
+
                 # Update combined_data for the next iteration
                 combined_data = combined_data[total_parsed_bytes:]
                 print(f'this is next comb data: {combined_data}')
@@ -300,8 +308,19 @@ async def handle_handshake(reader, writer):
                             value = command[2]
                             handle_set_command(key, value)
                             print(f'offset at start of set: {total_offset}')
+                            
+                            getack_found = False
+
+                            for cmd in commands:
+                                if cmd == "GETACK" or "GETACK" in cmd:
+                                    getack_found = True
+                                    print("GETACK is in command")
+
                             if not set_received:
-                                total_offset += total_parsed_bytes-37
+                                if getack_found:
+                                    total_offset += total_parsed_bytes - 37
+                                else:
+                                    total_offset += total_parsed_bytes
                                 set_received = True
                             print(f'offset after updating if it is updated: {total_offset}')
                             print(f'parsed bytes: {total_parsed_bytes}')
@@ -317,7 +336,7 @@ async def handle_handshake(reader, writer):
                         elif command == "GETACK" or "GETACK" in command:
                             print('im in getack')
                             if not getack_received:
-                               
+                                
                                 response = f"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${len(str(total_offset))}\r\n{total_offset}\r\n"
                                
                                 print(f"this is my res: {response.encode()}")
