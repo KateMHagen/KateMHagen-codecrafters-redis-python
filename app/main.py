@@ -26,6 +26,7 @@ def parse_resp(data):
     parts = data.split(b'\r\n')
     commands = []
     total_parsed_bytes = 0
+    command_bytes = 0
     i = 0
 
     while i < len(parts):
@@ -33,28 +34,24 @@ def parse_resp(data):
 
         if part.startswith(b'+'):  # Simple string
             commands.append(part[1:].decode('utf-8'))
-            total_parsed_bytes += len(part) + 2  # +2 for '\r\n'
+            command_bytes += len(part) + 2  # +2 for '\r\n'
             i += 1
             
         elif part.startswith(b'$'):  # Bulk string
             length_str = part[1:]
+            
             if length_str:
                 length = int(length_str)
-                # Ensure there are enough parts remaining for the bulk string and its terminator
-                if i + 1 < len(parts):
-                    total_parsed_bytes += len(part) + 2  # +2 for '\r\n'
+                command_bytes += len(part) + 2  # +2 for '\r\n'
+                i += 1
+                if i < len(parts) and len(parts[i]) == length:  # Check if the length matches
+                    element = parts[i].decode('utf-8', errors='ignore')
+                    commands.append(element)
+                    command_bytes += len(parts[i]) + 2  # +2 for '\r\n'
                     i += 1
-                    if len(parts[i]) == length:  # Check if the length matches
-                        element = parts[i].decode('utf-8', errors='ignore')
-                        commands.append(element)
-                        total_parsed_bytes += len(parts[i]) + 2  # +2 for '\r\n'
-                        i += 1
-                    else:
-                        print(f"Invalid length for bulk string at parts[{i}], expected {length} but got {len(parts[i])}")
-                        break  # Exit since we can't parse the message completely
                 else:
-                    print("Not enough parts for bulk string")
-                    break  # Exit if we don't have enough data
+                    print(f"Invalid length for bulk string at parts[{i}], expected {length} but got {len(parts[i])}")
+                    break
             else:
                 print(f"parts[{i}] = {parts[i]}, length is empty")
                 i += 1
@@ -63,7 +60,7 @@ def parse_resp(data):
             num_str = part[1:]
             if num_str:
                 num_elements = int(num_str)
-                total_parsed_bytes += len(part) + 2  # +2 for '\r\n'
+                command_bytes += len(part) + 2  # +2 for '\r\n'
                 i += 1
                 elements = []
                 for _ in range(num_elements):
@@ -71,31 +68,32 @@ def parse_resp(data):
                         length_str = parts[i][1:]
                         if length_str:
                             length = int(length_str)
-                            total_parsed_bytes += len(parts[i]) + 2  # +2 for '\r\n'
+                            command_bytes += len(parts[i]) + 2  # +2 for '\r\n'
                             i += 1
-                            if i < len(parts) and len(parts[i]) == length:  # Check if the length matches
+                            if i < len(parts) and len(parts[i]) == length:
                                 element = parts[i].decode('utf-8', errors='ignore')
                                 elements.append(element)
-                                total_parsed_bytes += len(parts[i]) + 2  # +2 for '\r\n'
+                                command_bytes += len(parts[i]) + 2  # +2 for '\r\n'
                                 i += 1
-                            else:
-                                print(f"Invalid length for bulk string at parts[{i}], expected {length} but got {len(parts[i])}")
-                                break  # Exit since we can't parse the message completely
+                            # else:
+                            #     print(f"Invalid length for bulk string at parts[{i}], expected {length} but got {len(parts[i])}")
+                            #     break
                         else:
-                            print(f"parts[{i}] = {parts[i]}, length is empty")
+                            # print(f"parts[{i}] = {parts[i]}, length is empty")
                             i += 1
-                    else:
-                        print(f"Invalid or missing $ prefix at parts[{i}]")
-                        break  # Exit since we can't parse the message completely
+                    # else:
+                    #     print(f"Invalid or missing $ prefix at parts[{i}]")
+                    #     break
                 commands.append(elements)
             else:
-                print(f"parts[{i}] = {parts[i]}, num_elements is empty")
+                # print(f"parts[{i}] = {parts[i]}, num_elements is empty")
                 i += 1
                 
         else:
-            print(f"Unknown prefix at parts[{i}]")
-            total_parsed_bytes += len(part) + 2  # +2 for '\r\n'
+            # print(f"Unknown prefix at parts[{i}]")
             i += 1
+
+    total_parsed_bytes = command_bytes
 
     # Determine how much data to keep for future calls
     if i < len(parts):
@@ -103,8 +101,11 @@ def parse_resp(data):
     else:
         remaining_data = b''  # No remaining data
 
-    print("COMMANDS: ", commands)
+    print(f"Parsed commands: {commands}, Total parsed bytes: {total_parsed_bytes}, Remaining data: {remaining_data}")
+
     return commands, total_parsed_bytes, remaining_data
+
+
 
 
 
@@ -238,12 +239,6 @@ async def handle_client(reader, writer):
     await writer.wait_closed()
 
 async def handle_handshake(reader, writer):
-    """
-    Send handshake.
-    Connects to the master server if the current server is a replica.
-    The replica sends a PING command to the master server, then sends REPLCONF twice to the master,
-    and lastly a PSYNC to the master.
-    """
     print('from run handshake')
     replicas.append(writer)
 
@@ -270,8 +265,10 @@ async def handle_handshake(reader, writer):
 
     # Flag to indicate handshake completion
     handshake_complete = True
-
     remaining_data = b''
+    total_offset = 0
+    getack_received = False  # Track if a GETACK was processed
+    set_received = False
     while True:
         data = await reader.read(1024)
         if not data:
@@ -279,41 +276,78 @@ async def handle_handshake(reader, writer):
 
         if handshake_complete:
             print("Received RDB file. Handshake complete")
-            
-            # Combine any remaining data from the previous parse with new data
+        # Combine any remaining data from the previous parse with new data
             combined_data = remaining_data + data
-            
             while combined_data:
+                # set_received = False
+                print(f'this is combined data: {combined_data}')
                 commands, total_parsed_bytes, remaining_data = parse_resp(combined_data)
                 print(f"Received from master: {commands}")
-                
+                print(f"Total parsed bytes: {total_parsed_bytes}")
                 # Update combined_data for the next iteration
                 combined_data = combined_data[total_parsed_bytes:]
-
+                print(f'this is next comb data: {combined_data}')
                 if isinstance(commands, list):
                     print('hello1')
-                    it = iter(commands)
-                    for command in it:
+                    print(commands)
+                    for command in commands:
                         print(f'this is command: {command}')
+                        print(f"curr total offset: {total_offset}")
                         
                         if isinstance(command, list) and command and command[0] == "SET" and len(command) == 3:
                             print('im in set')
                             key = command[1]
                             value = command[2]
                             handle_set_command(key, value)
-                        elif command == "SET":
-                            try:
-                                key = next(it)
-                                value = next(it)
-                                handle_set_command(key, value)
-                            except StopIteration:
-                                print("Error: Not enough arguments for SET command.")
-                                
+                            print(f'offset at start of set: {total_offset}')
+                            if not set_received:
+                                total_offset += total_parsed_bytes-37
+                                set_received = True
+                            print(f'offset after updating if it is updated: {total_offset}')
+                            print(f'parsed bytes: {total_parsed_bytes}')
+                        # elif command == "SET":
+                        #     print("im in set 2")
+                        #     key = command[1]
+                        #     value = command[2]
+                        #     handle_set_command(key, value)
+                        #     total_offset += total_parsed_bytes
+                        #     print(f'peepee: {total_offset}')
+                         
+                        
                         elif command == "GETACK" or "GETACK" in command:
                             print('im in getack')
-                            writer.write(b"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n")
-                            await writer.drain()
+                            if not getack_received:
+                               
+                                response = f"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${len(str(total_offset))}\r\n{total_offset}\r\n"
+                               
+                                print(f"this is my res: {response.encode()}")
+                                print(f"total offset in getack: {total_offset}")
+                                writer.write(response.encode())
+                                await writer.drain()
+                                getack_received = True
+                                total_offset += 37
+                                print(f"offset after updating: {total_offset}")
+                                
+                                
+                           
+                        elif command == "PING" or "PING" in command:
+                            print(f'in ping {total_offset}')
+                            total_offset += 14
+                            print(total_offset)
+                            print(total_parsed_bytes)
+                            # Silently process PING
                         
+                    
+                    
+                    for cmd in commands:
+                        if "GETACK" in cmd:
+                            getack_received = False
+                            break
+                    if "GETACK" in commands:
+                            getack_received = False
+                            break
+                    
+                    
                 else:
                     print(f"Invalid command format: {commands}")
 
@@ -323,9 +357,6 @@ async def handle_handshake(reader, writer):
         
 
 
-    # if b"GETACK" in test1 or test2:
-    #     writer.write("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".encode())
-    #     await writer.drain()
     
 def handle_set_command(key, value):
    
