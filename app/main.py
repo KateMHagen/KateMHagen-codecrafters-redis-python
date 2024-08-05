@@ -22,9 +22,7 @@ replica_reader = None
 master_port = None
 
 def parse_resp(data):
-    print(f' this is input data {data}')
     parts = data.split(b'\r\n')
-    print(f'parts: {parts}')
     commands = []
     total_parsed_bytes = 0
     command_bytes = 0
@@ -51,10 +49,8 @@ def parse_resp(data):
                     command_bytes += len(parts[i]) + 2  # +2 for '\r\n'
                     i += 1
                 else:
-                    print(f"Invalid length for bulk string at parts[{i}], expected {length} but got {len(parts[i])}")
                     break
             else:
-                print(f"parts[{i}] = {parts[i]}, length is empty")
                 i += 1
                 
         elif part.startswith(b'*'):  # Array
@@ -64,9 +60,10 @@ def parse_resp(data):
                 command_bytes += len(part) + 2  # +2 for '\r\n'
                 i += 1
                 elements = []
-                for _ in range(num_elements):
-                    if i < len(parts) and parts[i].startswith(b'$'):
-                        length_str = parts[i][1:]
+                while num_elements > 0 and i < len(parts):
+                    part = parts[i]
+                    if part.startswith(b'$'):
+                        length_str = part[1:]
                         if length_str:
                             length = int(length_str)
                             command_bytes += len(parts[i]) + 2  # +2 for '\r\n'
@@ -76,35 +73,29 @@ def parse_resp(data):
                                 elements.append(element)
                                 command_bytes += len(parts[i]) + 2  # +2 for '\r\n'
                                 i += 1
-                            # else:
-                            #     print(f"Invalid length for bulk string at parts[{i}], expected {length} but got {len(parts[i])}")
-                            #     break
+                                num_elements -= 1
+                            else:
+                                break
                         else:
-                            # print(f"parts[{i}] = {parts[i]}, length is empty")
                             i += 1
-                    # else:
-                    #     print(f"Invalid or missing $ prefix at parts[{i}]")
-                    #     break
+                    else:
+                        break
                 commands.append(elements)
             else:
-                # print(f"parts[{i}] = {parts[i]}, num_elements is empty")
                 i += 1
                 
         else:
-            # print(f"Unknown prefix at parts[{i}]")
             i += 1
 
     total_parsed_bytes = command_bytes
 
-    # Determine how much data to keep for future calls
     if i < len(parts):
         remaining_data = b'\r\n'.join(parts[i:])  # Keep unprocessed parts
     else:
         remaining_data = b''  # No remaining data
 
-    print(f"Parsed commands: {commands}, Total parsed bytes: {total_parsed_bytes}, Remaining data: {remaining_data}")
-
     return commands, total_parsed_bytes, remaining_data
+
 
 
 async def handle_message(data, writer):
@@ -196,6 +187,9 @@ async def handle_message(data, writer):
                 writer.write(header.encode() + binary_data)
                 await writer.drain()
                 replica_writers.append(writer)
+                await writer.drain()
+            elif "WAIT" in cmd:
+                writer.write(":0\r\n".encode())
                 await writer.drain()
             
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
@@ -334,9 +328,7 @@ async def handle_handshake(reader, writer):
                             print(total_parsed_bytes)
                             # Silently process PING
                         
-                        elif command == "WAIT" or "WAIT" in command:
-                            writer.write(":0\r\n".encode())
-                            await writer.drain()
+                        
                         
                     
                     
