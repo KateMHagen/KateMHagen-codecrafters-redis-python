@@ -21,6 +21,8 @@ replica_port = None
 replica_reader = None
 master_port = None
 
+
+
 def parse_resp(data):
     print(f' this is input data {data}')
     parts = data.split(b'\r\n')
@@ -202,7 +204,8 @@ async def handle_message(data, writer):
                 replica_writers.append(writer)
                 await writer.drain()
             elif "WAIT" in cmd:
-                writer.write(":0\r\n".encode())
+                # Answer with the amount of replicas that "confirmed" the response
+                writer.write(f":{len(replica_writers)}\r\n".encode())
                 await writer.drain()
             
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
@@ -233,6 +236,7 @@ async def handle_client(reader, writer):
     await writer.wait_closed()
 
 async def handle_handshake(reader, writer):
+   
     print('from run handshake')
     replicas.append(writer)
 
@@ -270,6 +274,7 @@ async def handle_handshake(reader, writer):
 
         if handshake_complete:
             print("Received RDB file. Handshake complete")
+            
         # Combine any remaining data from the previous parse with new data
             combined_data = remaining_data + data
             # Replicas should update their offset to account for all commands propagated from the master, including PING and REPLCONF itself.
