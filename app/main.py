@@ -218,20 +218,24 @@ async def handle_message(data, writer):
                 await writer.drain()
                 
             elif "WAIT" in cmd:
-                # Answer with the amount of replicas that "confirmed" the response
-                # if len(replica_writers) == data_split[4]:
-                #     writer.write(f":{len(replica_writers)}\r\n".encode())
-                # await writer.drain()
+                # This command waits for a specified number of replicas to acknowledge the received command.
+                # It sends REPLCONF GETACK commands to all replicas, then waits for the specified number of acknowledgments
+                # or until the given timeout expires. Finally, it returns the number of acknowledgments received to the client.
+
                 num_replicas_created = int(data_split[4])
-                timeout = float(data_split[6]) / 1000
+                timeout = float(data_split[6]) / 1000 # Convert to seconds
 
+                # Start timing and capture the current number of acknowledgments to avoid double counting
                 start = time.time()
-                initial_ack_count = ack_replicas  # Capture initial count to avoid double counting
-
+                initial_ack_count = ack_replicas  
+                
+                # Send the REPLCONF GETACK command to all replicas
                 for replica in replica_writers:
                     replica.write("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n".encode())
                     await writer.drain()
 
+                # Continuously check if the required number of replicas have acknowledged
+                # or if the timeout has been reached
                 while (ack_replicas - initial_ack_count < num_replicas_created) and ((time.time() - start) < timeout):
                     current_time = time.time()
                     elapsed_time = current_time - start
@@ -240,14 +244,13 @@ async def handle_message(data, writer):
                         f"elapsed_time: {elapsed_time:.4f} seconds, "
                         f"timeout: {timeout:.4f} seconds"
                     )
-                    await asyncio.sleep(0.005)
+                    await asyncio.sleep(0.005) # Short sleep to avoid busy-waiting and allow other tasks to run
                 
-
+                # Calculate the final number of acknowledgments received within the timeout period
                 final_acks = ack_replicas - initial_ack_count
-                print(f"sending back {final_acks}")
-                
-                if ack_replicas > 1:
-                    ack_replicas -= 1
+    
+                # Send the result back to the client: either the number of acknowledgments received
+                # or the total number of replica writers if a different command (like SET) was issued
                 writer.write(f":{final_acks if set_cmd else len(replica_writers) }\r\n".encode())
                
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
