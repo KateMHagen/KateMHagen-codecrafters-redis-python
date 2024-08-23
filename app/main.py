@@ -14,9 +14,10 @@ class Item:
 store = defaultdict(Item)
 replicas = []
 replica_writers = []
+ack_replicas = 0
 
 WRITE_COMMANDS = ["SET"]
-
+set_cmd = False
 replica_port = None
 replica_reader = None
 master_port = None
@@ -114,13 +115,13 @@ def parse_resp(data):
 
 
 async def handle_message(data, writer):
-    global master_port, port, replica_port
+    global master_port, port, replica_port, ack_replicas, set_cmd
     print("from handle msg")
     print("data: " + data)
   
     if data:
         data_split = data.split("\r\n")
-        print(data_split)
+        print(f"data split: {data_split}")
         if len(data_split) > 2:
             cmd = data_split[2].upper()
 
@@ -142,6 +143,7 @@ async def handle_message(data, writer):
                     expire = None
                 
                 store[key] = Item(value, expire) 
+                set_cmd = True
                 writer.write("+OK\r\n".encode())
                 await writer.drain()
             elif "GET" in cmd:
@@ -183,11 +185,22 @@ async def handle_message(data, writer):
                     writer.write("$-1\r\n".encode())
                     await writer.drain()
             elif "REPLCONF" in cmd: # Respond to REPLCONF command
-                print(data_split)
+                print("I'm in replconf")
+                response = ""
                 if "listening-port" in data_split:
                     replica_port = data_split[6]
-                writer.write('+OK\r\n'.encode())
-                await writer.drain()
+                    response = '+OK\r\n'
+                # writer.write('+OK\r\n'.encode())
+                elif "capa" in data_split:
+                    response = '+OK\r\n'
+                elif data_split[4] == "ACK":
+                    # Increase num of acknowledged replicas
+                    ack_replicas += 1                
+                    print(f"Increasing number of acknowledged replicas to: {ack_replicas}")
+                    
+                if response:
+                    writer.write(response.encode())
+                    await writer.drain()
                 
             elif "PSYNC" in cmd:
                 global replica_writer
@@ -203,11 +216,40 @@ async def handle_message(data, writer):
                 await writer.drain()
                 replica_writers.append(writer)
                 await writer.drain()
+                
             elif "WAIT" in cmd:
                 # Answer with the amount of replicas that "confirmed" the response
-                writer.write(f":{len(replica_writers)}\r\n".encode())
-                await writer.drain()
-            
+                # if len(replica_writers) == data_split[4]:
+                #     writer.write(f":{len(replica_writers)}\r\n".encode())
+                # await writer.drain()
+                num_replicas_created = int(data_split[4])
+                timeout = float(data_split[6]) / 1000
+
+                start = time.time()
+                initial_ack_count = ack_replicas  # Capture initial count to avoid double counting
+
+                for replica in replica_writers:
+                    replica.write("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n".encode())
+                    await writer.drain()
+
+                while (ack_replicas - initial_ack_count < num_replicas_created) and ((time.time() - start) < timeout):
+                    current_time = time.time()
+                    elapsed_time = current_time - start
+                    print(
+                        f"NUMACKS: {ack_replicas - initial_ack_count} of {num_replicas_created}, "
+                        f"elapsed_time: {elapsed_time:.4f} seconds, "
+                        f"timeout: {timeout:.4f} seconds"
+                    )
+                    await asyncio.sleep(0.005)
+                
+
+                final_acks = ack_replicas - initial_ack_count
+                print(f"sending back {final_acks}")
+                
+                if ack_replicas > 1:
+                    ack_replicas -= 1
+                writer.write(f":{final_acks if set_cmd else len(replica_writers) }\r\n".encode())
+               
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
                 await propagate_commands(data)
 
@@ -343,8 +385,13 @@ async def handle_handshake(reader, writer):
                                 getack_received = True
                                 total_offset += 37
                                 print(f"offset after updating: {total_offset}")
-                                
-                                
+                        
+                        # elif command == "ACK" or "ACK" in command:
+                        #     # Increase num of acknowledged replicas
+                        #     ack_replicas += 1
+                        #     print(f"Increasing number of acknowledged replicas to: {ack_replicas}")
+                            
+                        #     return None
                            
                         elif command == "PING" or "PING" in command:
                             print(f'in ping {total_offset}')
