@@ -1,7 +1,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 import time
-from typing import List, Optional
+from typing import Optional
 import asyncio
 import argparse
 
@@ -252,7 +252,17 @@ async def handle_message(data, writer):
                 # Send the result back to the client: either the number of acknowledgments received
                 # or the total number of replica writers if a different command (like SET) was issued
                 writer.write(f":{final_acks if set_cmd else len(replica_writers) }\r\n".encode())
-               
+            
+            elif "CONFIG" in cmd:
+                print("config")
+                if "GET" in data_split:
+                    print("in config get")
+                    if "dir" in data_split:
+                        response = f"*2\r\n$3\r\ndir\r\n${len(dir)}\r\n{dir}\r\n"
+                    elif "dbfilename" in data_split:
+                        response = f"*2\r\n$10\r\ndbfilenamer\r\n${len(dbfilename)}\r\n{dbfilename}\r\n"
+                    writer.write(response.encode())
+            
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
                 await propagate_commands(data)
 
@@ -403,6 +413,7 @@ async def handle_handshake(reader, writer):
                             print(total_parsed_bytes)
                             # Silently process PING
                         
+
                         
                         
                     
@@ -434,10 +445,6 @@ def handle_set_command(key, value):
     print(f"Set {key} to {value}")
     print(f'this is store: {store}')
 
-
-
-
-
 async def connect_master(replica):
     host, port = replica.split(" ")
     reader_writer = await asyncio.open_connection(host, port)
@@ -453,15 +460,19 @@ async def connect_master(replica):
 async def main():
     # You can use print statements as follows for debugging, they'll be visible when running tests.
     print("Logs from your program will appear here!")
-    global port, master_host, master_port, args
+    global port, master_host, master_port, args, dir, dbfilename
     # Start TCP server listening on localhost and port specified or default to 6379 if port is not specified
     parser = argparse.ArgumentParser("A Redis server written in Python")
     parser.add_argument('--port', type=int, default=6379, help="Port to run the server on")
     parser.add_argument('--replicaof', type=str, default=None, help="Replica server and port")
-    
+    parser.add_argument('--dir', type=str, default=None, help="Path where the RDB file is stored")
+    parser.add_argument('--dbfilename', type=str, default=None, help="Name of the RDB file")
+
     args = parser.parse_args()
     port = args.port
     master_port = port
+    dir = args.dir
+    dbfilename = args.dbfilename
     server_socket = await asyncio.start_server(handle_client, "localhost", port)
     
     try:
