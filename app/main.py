@@ -116,7 +116,7 @@ def parse_resp(data):
 
 
 async def handle_message(data, writer):
-    global master_port, port, replica_port, ack_replicas, set_cmd
+    global master_port, port, replica_port, ack_replicas, set_cmd, find_value
     print("from handle msg")
     print("data: " + data)
     
@@ -150,8 +150,11 @@ async def handle_message(data, writer):
             elif "GET" in cmd:
                 
                 if dir and dbfilename:
+                    find_value = True
                     response = get_value_from_rdb()
-                    writer.write(response.encode())
+                    key = data_split[4]
+                    store_item = store.get(key)
+                    writer.write(f"${len(store_item.value)}\r\n{store_item.value}\r\n".encode())
                     await writer.drain()
                 else:
                     key = data_split[4]
@@ -319,10 +322,8 @@ def get_value_from_rdb():
                 if rdb_content:
                     # Parse content to extract keys
                     result = parse_redis_file_format(rdb_content)
-                    response = ""
-                    for item in result:
-                        response += f"${len(item)}\r\n{item}\r\n"
-                    return response
+                    print(f"result from parse value: {result}")
+                   
     # If RDB file doesn't exist or no args provided
     return "*0\r\n".encode()
 
@@ -332,43 +333,71 @@ def parse_redis_file_format(file_format):
     split_parts = file_format.split("\\")
     resizedb_index = split_parts.index("xfb")
     print(f"split parts: {split_parts}")
-    print(f"index: {resizedb_index}")
-    result_arr = []
-    if find_value:
-        result_index = resizedb_index + 5
-        result_arr.append(split_parts[result_index])
-    else:
-        
-        result_index = resizedb_index + 4
-        result_arr.append(split_parts[result_index])
-        
-        while result_index < len(split_parts) - 4:
-            result_index +=3
-            print(f"len of arr {len(split_parts)}")
-            print(result_index)
-            result_arr.append(split_parts[result_index])
 
-    # Key bytes will be for example x04pear so need to remove the bytes
-    result = remove_bytes_chars(result_arr)
+    result_key_arr = []
+    result_value_arr = []
+  
+    result_value_index = resizedb_index + 5
+    result_value_arr.append(split_parts[result_value_index])
+    while result_value_index < len(split_parts) - 4:
+        result_value_index +=3
+        result_value_arr.append(split_parts[result_value_index])
+
+        
+    result_key_index = resizedb_index + 4
+    result_key_arr.append(split_parts[result_key_index])
+    while result_key_index < len(split_parts) - 4:
+        result_key_index +=3
+        result_key_arr.append(split_parts[result_key_index])
+
+    # Key/value bytes will be for example x04pear so need to remove the bytes
+    print(f'result key arr {result_key_arr}')
+    print(f'result val arr {result_value_arr}')
+    result = remove_bytes_chars(result_key_arr, result_value_arr)
     print(f'result from parse {result}')
     return result
 
-def remove_bytes_chars(arr):
-    # If string starts "x", remove first 3 chars
+def remove_bytes_chars(key_arr, value_arr):
     i = 0
-    res_arr = []
-    
-    for item in arr:
-        if item.startswith("x"):
-            new_item = item[3:]
-        # If string starts "t", remove first char
-        elif item.startswith("t") or item.startswith("n"):
-            new_item = item[1:]
+    new_key_arr = []
+    new_value_arr = []
+    new_key = ""
+    new_value = ""
+    for i in range(len(key_arr)):
+        # If string starts "x", remove first 3 chars
+        if key_arr[i].startswith("x"): 
+            new_key = key_arr[i][3:]
         
-        if len(new_item) > 1 and new_item.isalpha():
-            res_arr.append(new_item)
- 
-    return res_arr
+        # If string starts "t", remove first char
+        elif key_arr[i].startswith("t") or key_arr[i].startswith("n"): 
+            new_key = key_arr[i][1:]
+  
+        # If item has non-alphabetic characters and are too short, dont include them
+        if len(new_key) > 1 and new_key.isalpha():
+            new_key_arr.append(new_key)
+
+        # store[new_key] = Item(new_value, None) 
+
+    for i in range(len(value_arr)):
+        # If string starts "x", remove first 3 chars
+        if value_arr[i].startswith("x"):
+            new_value = value_arr[i][3:]
+        # If string starts "t", remove first char
+        elif value_arr[i].startswith("t") or value_arr[i].startswith("n"):
+            new_value = value_arr[i][1:]
+        # If item has non-alphabetic characters and are too short, dont include them
+        if len(new_value) > 1 and new_value.isalpha():
+            new_value_arr.append(new_value)
+    
+    for key, value in zip(new_key_arr, new_value_arr):
+        store[key] = Item(value, None) 
+    
+    print(f'key arr {new_key_arr}')
+    print(f'val arr {new_value_arr}')
+    if find_value:
+        return new_value_arr
+    else:
+        return new_key_arr
 
 
 async def propagate_commands(data):
