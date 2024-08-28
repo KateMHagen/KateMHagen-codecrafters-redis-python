@@ -365,7 +365,7 @@ def remove_bytes_chars(arr):
         elif item.startswith("t") or item.startswith("n"):
             new_item = item[1:]
         
-        if len(new_item) > 3:
+        if len(new_item) > 1 and new_item.isalpha():
             res_arr.append(new_item)
  
     return res_arr
