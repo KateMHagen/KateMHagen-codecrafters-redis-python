@@ -22,7 +22,7 @@ set_cmd = False
 replica_port = None
 replica_reader = None
 master_port = None
-
+find_value = False
 
 
 def parse_resp(data):
@@ -148,27 +148,33 @@ async def handle_message(data, writer):
                 writer.write("+OK\r\n".encode())
                 await writer.drain()
             elif "GET" in cmd:
-                key = data_split[4]
-                store_item: Optional[Item] = store.get(key)
-                print(f"store {store}")
-
-                if (
-                    # If store and value exists
-                    store
-                    and store_item.value
-                    and (
-                        store_item.expiry is None # No expiry
-                        or (
-                            # Expiry is in the future
-                            store_item.expiry is not None
-                            and store_item.expiry > (time.time_ns() // 10**6)
-                        )
-                    )
-                ):
-                    writer.write(f"${len(store_item.value)}\r\n{store_item.value}\r\n".encode())
+                
+                if dir and dbfilename:
+                    value = get_value_from_rdb()
+                    writer.write(value)
+                    await writer.drain()
                 else:
-                    writer.write("$-1\r\n".encode())
-                await writer.drain()
+                    key = data_split[4]
+                    store_item: Optional[Item] = store.get(key)
+                    print(f"store {store}")
+
+                    if (
+                        # If store and value exists
+                        store
+                        and store_item.value
+                        and (
+                            store_item.expiry is None # No expiry
+                            or (
+                                # Expiry is in the future
+                                store_item.expiry is not None
+                                and store_item.expiry > (time.time_ns() // 10**6)
+                            )
+                        )
+                    ):
+                        writer.write(f"${len(store_item.value)}\r\n{store_item.value}\r\n".encode())
+                    else:
+                        writer.write("$-1\r\n".encode())
+                    await writer.drain()
             elif "INFO" in cmd: # Respond to INFO replication command
                 info_type = data_split[4] if len(data_split) == 6 else None
                 if info_type and info_type == "replication":
@@ -267,8 +273,9 @@ async def handle_message(data, writer):
             elif "KEYS" in cmd:
                 # Return all keys in database
                 if "*" in data_split:
-                    result = get_keys_from_rdb()
-                    writer.write(result)
+                    keys = get_keys_from_rdb()
+                    writer.write(keys)
+                    await writer.drain()
 
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
                 await propagate_commands(data)
@@ -291,25 +298,49 @@ def get_keys_from_rdb():
     # If RDB file doesn't exist or no args provided
     return "*0\r\n".encode()
 
+def get_value_from_rdb():
+    print("im in get value from rdb")
+    global find_value
+    find_value = True
+    if dir and dbfilename:
+        print(f"dir: {dir} , filename: {dbfilename}")
+        # Construct full path to RDB file
+        rdb_file_path = os.path.join(dir, dbfilename)
+        if os.path.exists(rdb_file_path):
+            # Open file and read its content
+            with open(rdb_file_path, "rb") as rdb_file:
+                rdb_content = str(rdb_file.read())
+                print(f"rdb content: {rdb_content}")
+                if rdb_content:
+                    # Parse content to extract keys
+                    value = parse_redis_file_format(rdb_content)
+                    return f"${len(value)}\r\n{value}\r\n".encode()
+    # If RDB file doesn't exist or no args provided
+    return "*0\r\n".encode()
+
 def parse_redis_file_format(file_format):
     # Content is seperated by "/" so get the different parts
     split_parts = file_format.split("\\")
     resizedb_index = split_parts.index("xfb")
-    key_index = resizedb_index + 4
-    key_bytes = split_parts[key_index]
+   
+    if find_value:
+        result_index = resizedb_index + 5
+    else:
+        result_index = resizedb_index + 4
+    result_bytes = split_parts[result_index]
     
     # Key bytes will be for example x04pear so need to remove the bytes
-    key = remove_bytes_chars(key_bytes)
-    print(f'key from parse {key}')
-    return key
+    result = remove_bytes_chars(result_bytes)
+    print(f'result from parse {result}')
+    return result
 
-def remove_bytes_chars(key):
+def remove_bytes_chars(string):
     # If string starts "x", remove first 3 chars
-    if key.startswith("x"):
-        return key[3:]
+    if string.startswith("x"):
+        return string[3:]
     # If string starts "t", remove first char
-    elif key.startswith("t"):
-        return key[1:]
+    elif string.startswith("t"):
+        return string[1:]
 
 
 async def propagate_commands(data):
