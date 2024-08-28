@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
+import os
 import time
 from typing import Optional
 import asyncio
@@ -118,7 +119,7 @@ async def handle_message(data, writer):
     global master_port, port, replica_port, ack_replicas, set_cmd
     print("from handle msg")
     print("data: " + data)
-  
+    
     if data:
         data_split = data.split("\r\n")
         print(f"data split: {data_split}")
@@ -263,8 +264,53 @@ async def handle_message(data, writer):
                         response = f"*2\r\n$10\r\ndbfilenamer\r\n${len(dbfilename)}\r\n{dbfilename}\r\n"
                     writer.write(response.encode())
             
+            elif "KEYS" in cmd:
+                # Return all keys in database
+                if "*" in data_split:
+                    result = get_keys_from_rdb()
+                    writer.write(result)
+
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
                 await propagate_commands(data)
+
+def get_keys_from_rdb():
+    print("im in get keys from rdb")
+    if dir and dbfilename:
+        print(f"dir: {dir} , filename: {dbfilename}")
+        # Construct full path to RDB file
+        rdb_file_path = os.path.join(dir, dbfilename)
+        if os.path.exists(rdb_file_path):
+            # Open file and read its content
+            with open(rdb_file_path, "rb") as rdb_file:
+                rdb_content = str(rdb_file.read())
+                
+                if rdb_content:
+                    # Parse content to extract keys
+                    key = parse_redis_file_format(rdb_content)
+                    return f"*1\r\n${len(key)}\r\n{key}\r\n".encode()
+    # If RDB file doesn't exist or no args provided
+    return "*0\r\n".encode()
+
+def parse_redis_file_format(file_format):
+    # Content is seperated by "/" so get the different parts
+    split_parts = file_format.split("\\")
+    resizedb_index = split_parts.index("xfb")
+    key_index = resizedb_index + 4
+    key_bytes = split_parts[key_index]
+    
+    # Key bytes will be for example x04pear so need to remove the bytes
+    key = remove_bytes_chars(key_bytes)
+    print(f'key from parse {key}')
+    return key
+
+def remove_bytes_chars(key):
+    # If string starts "x", remove first 3 chars
+    if key.startswith("x"):
+        return key[3:]
+    # If string starts "t", remove first char
+    elif key.startswith("t"):
+        return key[1:]
+
 
 async def propagate_commands(data):
     print("In propagate commands")
