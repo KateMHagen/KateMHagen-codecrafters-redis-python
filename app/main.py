@@ -150,8 +150,8 @@ async def handle_message(data, writer):
             elif "GET" in cmd:
                 
                 if dir and dbfilename:
-                    value = get_value_from_rdb()
-                    writer.write(value)
+                    response = get_value_from_rdb()
+                    writer.write(response.encode())
                     await writer.drain()
                 else:
                     key = data_split[4]
@@ -290,11 +290,16 @@ def get_keys_from_rdb():
             # Open file and read its content
             with open(rdb_file_path, "rb") as rdb_file:
                 rdb_content = str(rdb_file.read())
-                
+                print(f"rdb content: {rdb_content}")
                 if rdb_content:
                     # Parse content to extract keys
-                    key = parse_redis_file_format(rdb_content)
-                    return f"*1\r\n${len(key)}\r\n{key}\r\n".encode()
+                    result = parse_redis_file_format(rdb_content)
+                    print(f"eyoo {result}")
+                    response = ""
+                    for item in result:
+                        response += f"${len(item)}\r\n{item}\r\n"
+                    
+                    return f"*{len(result)}\r\n{response}".encode()
     # If RDB file doesn't exist or no args provided
     return "*0\r\n".encode()
 
@@ -313,34 +318,57 @@ def get_value_from_rdb():
                 print(f"rdb content: {rdb_content}")
                 if rdb_content:
                     # Parse content to extract keys
-                    value = parse_redis_file_format(rdb_content)
-                    return f"${len(value)}\r\n{value}\r\n".encode()
+                    result = parse_redis_file_format(rdb_content)
+                    response = ""
+                    for item in result:
+                        response += f"${len(item)}\r\n{item}\r\n"
+                    return response
     # If RDB file doesn't exist or no args provided
     return "*0\r\n".encode()
 
 def parse_redis_file_format(file_format):
+    print("in parse redis file format")
     # Content is seperated by "/" so get the different parts
     split_parts = file_format.split("\\")
     resizedb_index = split_parts.index("xfb")
-   
+    print(f"split parts: {split_parts}")
+    print(f"index: {resizedb_index}")
+    result_arr = []
     if find_value:
         result_index = resizedb_index + 5
+        result_arr.append(split_parts[result_index])
     else:
+        
         result_index = resizedb_index + 4
-    result_bytes = split_parts[result_index]
-    
+        result_arr.append(split_parts[result_index])
+        
+        while result_index < len(split_parts) - 4:
+            result_index +=3
+            print(f"len of arr {len(split_parts)}")
+            print(result_index)
+            result_arr.append(split_parts[result_index])
+
     # Key bytes will be for example x04pear so need to remove the bytes
-    result = remove_bytes_chars(result_bytes)
+    result = remove_bytes_chars(result_arr)
     print(f'result from parse {result}')
     return result
 
-def remove_bytes_chars(string):
+def remove_bytes_chars(arr):
     # If string starts "x", remove first 3 chars
-    if string.startswith("x"):
-        return string[3:]
-    # If string starts "t", remove first char
-    elif string.startswith("t"):
-        return string[1:]
+    i = 0
+    res_arr = []
+    
+    for item in arr:
+        if item.startswith("x"):
+            new_item = item[3:]
+        # If string starts "t", remove first char
+        elif item.startswith("t") or item.startswith("n"):
+            new_item = item[1:]
+        
+        if len(new_item) > 3:
+            res_arr.append(new_item)
+ 
+    return res_arr
 
 
 async def propagate_commands(data):
