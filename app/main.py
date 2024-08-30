@@ -398,6 +398,14 @@ def parse_redis_file_format(file_format):
     return result
 
 def convert_to_seconds(hex_strings):
+
+    #
+    # I tror denna funksjonen e feil!!!! :((
+    #
+    #
+    #
+
+
     # Clean and concatenate hex strings
     # Function to clean the hex string by removing invalid characters
     def clean_hex_string(hex_str):
@@ -418,7 +426,10 @@ def convert_to_seconds(hex_strings):
     # seconds = number / 1000.0
     return number
     
-    
+
+
+
+
 def remove_bytes_chars(key_arr, value_arr, expiry_arr):
     i = 0
     new_key_arr = []
