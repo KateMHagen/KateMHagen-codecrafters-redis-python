@@ -154,8 +154,21 @@ async def handle_message(data, writer):
                     response = get_value_from_rdb()
                     key = data_split[4]
                     store_item = store.get(key)
-                    writer.write(f"${len(store_item.value)}\r\n{store_item.value}\r\n".encode())
+                    # print(f"this is key, storeitem expiry {key, store_item.expiry}")
+                    
+                    time_now = time.time()
+                    print(f"time now {time_now}")
+                    print(f"store {store}")
+                    print(f"storeitem exp {store_item.expiry}")
+                    is_expired = True if (store_item.expiry and store_item.expiry < time_now) else False
+                    if not is_expired:
+                        writer.write(f"${len(store_item.value)}\r\n{store_item.value}\r\n".encode())
+                    else:
+                        writer.write("$-1\r\n".encode())
                     await writer.drain()
+                    
+                    # writer.write(f"${len(store_item.value)}\r\n{store_item.value}\r\n".encode())
+                    # await writer.drain()
                 else:
                     key = data_split[4]
                     store_item: Optional[Item] = store.get(key)
@@ -333,17 +346,43 @@ def parse_redis_file_format(file_format):
     split_parts = file_format.split("\\")
     resizedb_index = split_parts.index("xfb")
     print(f"split parts: {split_parts}")
-
+    start_index = 0
     result_key_arr = []
     result_value_arr = []
-  
+    result_expiry_arr = []
+    if "xfc" in split_parts:
+        while True:
+
+            try:
+                expiry_index = split_parts.index("xfc", start_index)
+                print(f"'xfc' found at index: {expiry_index}")
+                start_index = expiry_index + 1
+                if not expiry_index + 9 > len(split_parts):
+                    expiry = split_parts[expiry_index+1:expiry_index+9]
+                    print(expiry)
+                    expiry = convert_to_seconds(expiry)
+                
+                    print(f"expiry: {expiry}")
+                    result_expiry_arr.append(expiry)
+                    result_key_index = expiry_index + 9
+                    result_key_arr.append(split_parts[result_key_index])
+                
+
+                    result_value_index = expiry_index + 10
+                    result_value_arr.append(split_parts[result_value_index])
+                
+            except ValueError:
+                break
+    
+   
+    
     result_value_index = resizedb_index + 5
     result_value_arr.append(split_parts[result_value_index])
     while result_value_index < len(split_parts) - 4:
         result_value_index +=3
         result_value_arr.append(split_parts[result_value_index])
 
-        
+            
     result_key_index = resizedb_index + 4
     result_key_arr.append(split_parts[result_key_index])
     while result_key_index < len(split_parts) - 4:
@@ -353,11 +392,34 @@ def parse_redis_file_format(file_format):
     # Key/value bytes will be for example x04pear so need to remove the bytes
     print(f'result key arr {result_key_arr}')
     print(f'result val arr {result_value_arr}')
-    result = remove_bytes_chars(result_key_arr, result_value_arr)
+    print(f'result expiry arr {result_expiry_arr}')
+    result = remove_bytes_chars(result_key_arr, result_value_arr, result_expiry_arr)
     print(f'result from parse {result}')
     return result
 
-def remove_bytes_chars(key_arr, value_arr):
+def convert_to_seconds(hex_strings):
+    # Clean and concatenate hex strings
+    # Function to clean the hex string by removing invalid characters
+    def clean_hex_string(hex_str):
+        valid_chars = set('0123456789abcdefABCDEF')
+        # Remove 'x' and keep only valid hexadecimal characters
+        return ''.join(c for c in hex_str[1:] if c in valid_chars)
+        
+        # Clean each hex string and join them
+    cleaned_hex_data = ''.join(clean_hex_string(s) for s in hex_strings)
+
+    # Convert cleaned hex string to bytes
+    byte_data = bytes.fromhex(cleaned_hex_data)
+
+    # Interpret the bytes as an integer (assuming little-endian for this example)
+    number = int.from_bytes(byte_data[:4], byteorder='little')
+    
+    # Convert number to seconds (assuming the number represents milliseconds, for example)
+    # seconds = number / 1000.0
+    return number
+    
+    
+def remove_bytes_chars(key_arr, value_arr, expiry_arr):
     i = 0
     new_key_arr = []
     new_value_arr = []
@@ -367,16 +429,13 @@ def remove_bytes_chars(key_arr, value_arr):
         # If string starts "x", remove first 3 chars
         if key_arr[i].startswith("x"): 
             new_key = key_arr[i][3:]
-        
         # If string starts "t", remove first char
         elif key_arr[i].startswith("t") or key_arr[i].startswith("n"): 
             new_key = key_arr[i][1:]
-  
         # If item has non-alphabetic characters and are too short, dont include them
         if len(new_key) > 1 and new_key.isalpha():
             new_key_arr.append(new_key)
 
-        # store[new_key] = Item(new_value, None) 
 
     for i in range(len(value_arr)):
         # If string starts "x", remove first 3 chars
@@ -389,11 +448,18 @@ def remove_bytes_chars(key_arr, value_arr):
         if len(new_value) > 1 and new_value.isalpha():
             new_value_arr.append(new_value)
     
-    for key, value in zip(new_key_arr, new_value_arr):
-        store[key] = Item(value, None) 
+    if len(expiry_arr) > 1:
+        for key, value, expiry in zip(new_key_arr, new_value_arr, expiry_arr):
+            print('helloooo')
+            store[key] = Item(value, expiry)
+    else:
+        for key, value in zip(new_key_arr, new_value_arr):
+            print('pelloooo')
+            store[key] = Item(value, None)
     
     print(f'key arr {new_key_arr}')
     print(f'val arr {new_value_arr}')
+    print(f"this is the store {store}")
     if find_value:
         return new_value_arr
     else:
