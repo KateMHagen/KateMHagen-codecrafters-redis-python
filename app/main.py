@@ -309,6 +309,7 @@ def get_keys_from_rdb():
                 print(f"rdb content: {rdb_content}")
                 if rdb_content:
                     # Parse content to extract keys
+
                     result = parse_redis_file_format(rdb_content)
                     print(f"eyoo {result}")
                     response = ""
@@ -447,7 +448,7 @@ def remove_bytes_chars(key_arr, value_arr, expiry_arr):
         if len(new_key) > 1 and new_key.isalpha():
             new_key_arr.append(new_key)
 
-
+    print(f'new key arr {new_key_arr}')
     for i in range(len(value_arr)):
         # If string starts "x", remove first 3 chars
         if value_arr[i].startswith("x"):
