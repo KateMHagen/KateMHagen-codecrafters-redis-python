@@ -292,6 +292,33 @@ async def handle_message(data, writer):
                     keys = get_keys_from_rdb()
                     writer.write(keys)
                     await writer.drain()
+            elif "TYPE" in cmd:
+                # Returns the type of a value stored at a given key
+                key = data_split[4]
+                store_item = store.get(key)
+                if store_item:
+                    type_of_value = type(store_item.value)
+                    print(f"this is the type {type_of_value}")
+                    if type_of_value == str:
+                        type_of_value = "string"
+                    elif type_of_value == list:
+                        type_of_value = "list"
+                    elif type_of_value == set:
+                        type_of_value = "set"
+                    elif type_of_value == "<class 'zset'>":
+                        type_of_value = "zset"
+                    elif type_of_value == "<class 'hash'>":
+                        type_of_value = "hash"
+                    elif type_of_value == "<class 'stream'>":
+                        type_of_value = "stream"
+                        
+                    writer.write(f"+{type_of_value}\r\n".encode())
+                    await writer.drain()
+                else:
+                    writer.write("+none\r\n".encode())
+                    await writer.drain()
+
+
 
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
                 await propagate_commands(data)
@@ -399,14 +426,6 @@ def parse_redis_file_format(file_format):
     return result
 
 def convert_to_seconds(hex_strings):
-
-    #
-    # I tror denna funksjonen e feil!!!! :((
-    #
-    #
-    #
-
-
     # Clean and concatenate hex strings
     # Function to clean the hex string by removing invalid characters
     def clean_hex_string(hex_str):
