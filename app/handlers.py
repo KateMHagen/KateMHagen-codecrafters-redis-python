@@ -250,17 +250,21 @@ async def handle_type(data, stream_store, store, writer):
     stream_store_item = None
     print(f"this is stream store {stream_store}")
     if store.get(key):
+        print('a key in normal store')
         store_item = store.get(key)
     elif key in stream_store.entries:
+        print('a key in streamstore')
         stream_store_item = stream_store.entries[key]
+        print(stream_store_item)
     else:
+        print('no key in any of the stores')
         writer.write("+none\r\n".encode())
         await writer.drain()
                     
     if store_item or stream_store_item:
         if store_item:
             type_of_value = type(store_item.value)
-                    
+            
             if type_of_value == str:
                 type_of_value = "string"
             elif type_of_value == list:
@@ -268,7 +272,7 @@ async def handle_type(data, stream_store, store, writer):
             elif type_of_value == set:
                 type_of_value = "set"
         elif stream_store_item:
-            if isinstance(stream_store_item, StreamEntry):
+            if isinstance(stream_store_item, StreamEntry) or isinstance(stream_store_item, StreamEntries):
                 type_of_value = "stream"
                     
                         
@@ -282,13 +286,54 @@ async def handle_xadd(data, stream_store, writer):
     key = data[8]
     value = data[10]
     entry_data[key] = value
-    new_entry = StreamEntry(entry_id, entry_data)
+    xadd_done = False
+    stream_name = data[4]
     
-                
-    stream_key = StreamEntries(data[4])
-    print(f"type of stream key {type(stream_key)}")
-    print(f"stream key output {stream_key}")
-    stream_store.entries[stream_key.entries] = new_entry
-    print(f"this is stream store {stream_store}")
+    new_ms, new_seq = map(int, entry_id.split('-'))
+    print(f'first storer {stream_store} and done? {xadd_done}')
+    if not stream_store.entries:
+        if new_ms > 0 and new_seq > 0:
+            new_entry = StreamEntry(entry_id, entry_data)
+            print('hello store was empty')
+            print(new_entry)
+            await add_entry(new_entry, entry_id, stream_name, stream_store, writer)
+            xadd_done = True
+    
+   
+    if not xadd_done and stream_store.entries:
+        print(f"len of store {len(stream_store.entries)}")
+        # Last entry in store
+        prev_entry = list(stream_store.entries.values())[-1]
+        print(f'this is prev entry id {prev_entry.entries[-1].id}')
+        last_ms, last_seq = map(int, prev_entry.entries[-1].id.split('-'))
+        print(last_ms, new_ms, last_seq, new_seq)
+    
+        if new_ms > last_ms:
+            new_entry = StreamEntry(entry_id, entry_data)
+            await add_entry(new_entry, entry_id, stream_name, stream_store, writer)
+        elif new_ms == last_ms and new_seq > last_seq:
+                new_entry = StreamEntry(entry_id, entry_data)
+                await add_entry(new_entry, entry_id, stream_name, stream_store, writer)
+        elif new_ms == 0 and new_seq == 0:
+            writer.write("-ERR The ID specified in XADD must be greater than 0-0\r\n".encode())
+            await writer.drain()
+        else:
+            writer.write("-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n".encode())
+            await writer.drain()
+    elif not xadd_done:
+        print('eyooo')
+        new_entry = StreamEntry(entry_id, entry_data)
+        await add_entry(new_entry, entry_id, stream_name, stream_store, writer)
+    
+
+async def add_entry(new_entry, entry_id, stream_name, stream_store, writer):
+    stream_key = StreamEntries(entries=[])
+    print(f'this is stream key {stream_key}')
+    
+    if stream_name not in stream_store.entries:
+        stream_store.entries[stream_name] = stream_key
+    
+    stream_store.entries[stream_name].entries.append(new_entry)
+    print(stream_store)
     writer.write(f"$3\r\n{entry_id}\r\n".encode())
     await writer.drain()
