@@ -290,9 +290,15 @@ async def handle_xadd(data, stream_store, writer):
     xadd_done = False
     stream_name = data[4]
     
-    new_ms, new_seq = entry_id.split('-')
-    new_ms = int(new_ms)
-    print(f'first storer {stream_store} and done? {xadd_done}')
+    if len(entry_id) == 1:
+        if entry_id == "*":
+            new_ms = round(time.time()*1000)
+            new_seq = 0
+            
+    else:
+        new_ms, new_seq = entry_id.split('-')
+        new_ms = int(new_ms)
+    print(f'first store {stream_store} and done? {xadd_done}')
     if not stream_store.entries:
         if new_ms > 0 and new_seq == "*":
             new_seq = 0
@@ -354,5 +360,5 @@ async def add_entry(new_entry, entry_id, stream_name, stream_store, writer):
     
     stream_store.entries[stream_name].entries.append(new_entry)
     print(stream_store)
-    writer.write(f"$3\r\n{entry_id}\r\n".encode())
+    writer.write(f"${len(entry_id)}\r\n{entry_id}\r\n".encode())
     await writer.drain()
