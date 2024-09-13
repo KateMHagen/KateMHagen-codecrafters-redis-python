@@ -322,7 +322,7 @@ async def handle_xadd(data, stream_store, writer):
         print(f'this is prev entry id {prev_entry.entries[-1].id}')
         last_ms, last_seq = map(int, prev_entry.entries[-1].id.split('-'))
         print(last_ms, new_ms, last_seq, new_seq)
-        # new_seq = int(new_seq)
+        
         if new_seq == "*":
             if new_ms > last_ms:
                 new_seq = 0
@@ -362,3 +362,49 @@ async def add_entry(new_entry, entry_id, stream_name, stream_store, writer):
     print(stream_store)
     writer.write(f"${len(entry_id)}\r\n{entry_id}\r\n".encode())
     await writer.drain()
+
+async def handle_xrange(data, stream_store, writer):
+    print("from handle xrange")
+    start = data[6]
+    end = data[8]
+    key = data[4]
+    
+    if start is None:
+        start = stream_store.entries[key].entries[0].id
+    if end is None:
+        end = stream_store.entries[key].entries[-1].id
+    
+    # Result will be RESP array
+    res = "*0\r\n" 
+    
+    matching_entries = []
+    
+    # Filter entries by start and end ID
+    for entry in stream_store.entries[key].entries:
+        entry_id = entry.id
+        # Check if the entry is within the start and end range (inclusive)
+        if start <= entry_id <= end:
+            matching_entries.append(entry)
+    # Add length matching entries
+    res = f"*{len(matching_entries)}\r\n"
+    # Add length of data
+    res += f"*{len(matching_entries)}\r\n"
+
+    for entry in matching_entries:
+        # Add entry ID
+        res += f"${len(entry_id)}\r\n{entry.id}\r\n"
+        # Add the number of fields in "data"
+        res += f"*{len(entry.data) * 2}\r\n"  # Each key-value pair counts as 2 elements in RESP
+        
+        # Loop through the data dictionary of the current entry
+        for data_key, data_value in entry.data.items():
+            # Add the key
+            res += f"${len(data_key)}\r\n{data_key}\r\n"
+            # Add the value
+            res += f"${len(data_value)}\r\n{data_value}\r\n"
+        # Add length of data 
+        res += f"*{len(matching_entries)}\r\n"
+   
+    writer.write(res.encode())
+    await writer.drain()
+

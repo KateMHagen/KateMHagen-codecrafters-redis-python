@@ -5,7 +5,7 @@ import time
 from typing import Optional
 import asyncio
 import argparse
-from . import handlers
+from . import commands
 # Using data class because I want to store data, not use logic
 @dataclass
 class Item:
@@ -141,43 +141,46 @@ async def handle_message(data, writer):
             cmd = data_split[2].upper()
 
             if "PING" in cmd:
-                await handlers.handle_ping(writer)
+                await commands.handle_ping(writer)
                 
             elif "ECHO" in cmd:
-                await handlers.handle_echo(data_split, writer)
+                await commands.handle_echo(data_split, writer)
                 
             elif "SET" in cmd:
                 print("in set cmd")
-                await handlers.handle_set(data_split, writer, store)
+                await commands.handle_set(data_split, writer, store)
                 
             elif "GET" in cmd:
-                await handlers.handle_get(data_split, store, dir, dbfilename, Item, writer)
+                await commands.handle_get(data_split, store, dir, dbfilename, Item, writer)
                 
             elif "INFO" in cmd: # Respond to INFO replication command
-                await handlers.handle_info(data_split, args, writer)
+                await commands.handle_info(data_split, args, writer)
                 
             elif "REPLCONF" in cmd: # Respond to REPLCONF command
-                replica_port = await handlers.handle_replconf(data_split, writer)
+                replica_port = await commands.handle_replconf(data_split, writer)
                 
                 
             elif "PSYNC" in cmd:
-                await handlers.handle_psync(replica_writers, writer)
+                await commands.handle_psync(replica_writers, writer)
                 
             elif "WAIT" in cmd:
-                await handlers.handle_wait(data_split, replica_writers, writer)
+                await commands.handle_wait(data_split, replica_writers, writer)
                 
             elif "CONFIG" in cmd:
-                await handlers.handle_config(data_split, dir, dbfilename, writer)
+                await commands.handle_config(data_split, dir, dbfilename, writer)
                 
             elif "KEYS" in cmd:
-                await handlers.handle_keys(data_split, dir, dbfilename, writer)
+                await commands.handle_keys(data_split, dir, dbfilename, writer)
                 
             elif "TYPE" in cmd:
-                await handlers.handle_type(data_split, stream_store, store, writer)
+                await commands.handle_type(data_split, stream_store, store, writer)
                 
             elif "XADD" in cmd:
-                await handlers.handle_xadd(data_split, stream_store, writer)
+                await commands.handle_xadd(data_split, stream_store, writer)
                 
+            elif "XRANGE" in cmd:
+                await commands.handle_xrange(data_split, stream_store, writer)
+
             print("hello im dome")
             print(master_port, port, replica_port, cmd, WRITE_COMMANDS)
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
@@ -211,7 +214,7 @@ async def handle_client(reader, writer):
     writer.close()
     await writer.wait_closed()
 
-async def handle_handshake(reader, writer):
+async def run_handshake(reader, writer):
    
     print('from run handshake')
     replicas.append(writer)
@@ -361,7 +364,7 @@ async def connect_master(replica):
     reader = reader_writer[0]
     writer = reader_writer[1]
     
-    await handle_handshake(reader, writer)
+    await run_handshake(reader, writer)
 
     print("back in connect master")
    
