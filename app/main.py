@@ -35,22 +35,9 @@ replica_reader = None
 master_port = None
 find_value = False
 
-# def toggle_set_cmd(value: bool):
-#     global set_cmd
-#     set_cmd = value
-
 def toggle_find_value(value: bool):
     global find_value
     find_value = value
-
-# def set_replica_port(value: int):
-#     global replica_port
-#     replica_port = value
-#     return replica_port
-
-# def incr_ack_replicas():
-#     global ack_replicas
-#     ack_replicas += 1
 
 def parse_resp(data):
     print(f' this is input data {data}')
@@ -332,13 +319,6 @@ async def handle_handshake(reader, writer):
                                 getack_received = True
                                 total_offset += 37
                                 print(f"offset after updating: {total_offset}")
-                        
-                        # elif command == "ACK" or "ACK" in command:
-                        #     # Increase num of acknowledged replicas
-                        #     ack_replicas += 1
-                        #     print(f"Increasing number of acknowledged replicas to: {ack_replicas}")
-                            
-                        #     return None
                            
                         elif command == "PING" or "PING" in command:
                             print(f'in ping {total_offset}')
@@ -346,11 +326,7 @@ async def handle_handshake(reader, writer):
                             print(total_offset)
                             print(total_parsed_bytes)
                             # Silently process PING
-                        
-
-                        
-                        
-                    
+              
                     
                     for cmd in commands:
                         if "GETACK" in cmd:

@@ -9,6 +9,7 @@ from app.parsers import parse_redis_file_format
 set_cmd = False
 ack_replicas = 0
 replica_port = None
+
 async def handle_ping(writer):
     writer.write('+PONG\r\n'.encode())
     await writer.drain()
@@ -289,17 +290,25 @@ async def handle_xadd(data, stream_store, writer):
     xadd_done = False
     stream_name = data[4]
     
-    new_ms, new_seq = map(int, entry_id.split('-'))
+    new_ms, new_seq = entry_id.split('-')
+    new_ms = int(new_ms)
     print(f'first storer {stream_store} and done? {xadd_done}')
     if not stream_store.entries:
-        if new_ms > 0 and new_seq > 0:
-            new_entry = StreamEntry(entry_id, entry_data)
-            print('hello store was empty')
-            print(new_entry)
-            await add_entry(new_entry, entry_id, stream_name, stream_store, writer)
-            xadd_done = True
+        if new_ms > 0 and new_seq == "*":
+            new_seq = 0
+            
+        if new_ms == 0:
+            new_seq = 1
+
+        entry_id = f"{new_ms}-{new_seq}"
+        new_entry = StreamEntry(entry_id, entry_data)
+        print('hello store was empty')
+        print(new_entry)
+        await add_entry(new_entry, entry_id, stream_name, stream_store, writer)
+        xadd_done = True
+
     
-   
+    
     if not xadd_done and stream_store.entries:
         print(f"len of store {len(stream_store.entries)}")
         # Last entry in store
@@ -307,11 +316,21 @@ async def handle_xadd(data, stream_store, writer):
         print(f'this is prev entry id {prev_entry.entries[-1].id}')
         last_ms, last_seq = map(int, prev_entry.entries[-1].id.split('-'))
         print(last_ms, new_ms, last_seq, new_seq)
-    
+        # new_seq = int(new_seq)
+        if new_seq == "*":
+            if new_ms > last_ms:
+                new_seq = 0
+            else:
+                new_seq = last_seq + 1
+        else:
+            new_seq = int(new_seq)
+
         if new_ms > last_ms:
+            entry_id = f"{new_ms}-{new_seq}"
             new_entry = StreamEntry(entry_id, entry_data)
             await add_entry(new_entry, entry_id, stream_name, stream_store, writer)
         elif new_ms == last_ms and new_seq > last_seq:
+                entry_id = f"{new_ms}-{new_seq}"
                 new_entry = StreamEntry(entry_id, entry_data)
                 await add_entry(new_entry, entry_id, stream_name, stream_store, writer)
         elif new_ms == 0 and new_seq == 0:
