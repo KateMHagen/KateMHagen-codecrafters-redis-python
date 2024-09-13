@@ -369,6 +369,11 @@ async def handle_xrange(data, stream_store, writer):
     end = data[8]
     key = data[4]
     
+    if start == "-":
+        start = stream_store.entries[key].entries[0].id
+
+    if end == "+":
+        end = stream_store.entries[key].entries[-1].id
     if start is None:
         start = stream_store.entries[key].entries[0].id
     if end is None:
