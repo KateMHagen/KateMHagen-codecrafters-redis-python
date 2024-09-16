@@ -181,6 +181,9 @@ async def handle_message(data, writer):
             elif "XRANGE" in cmd:
                 await commands.handle_xrange(data_split, stream_store, writer)
 
+            elif "XREAD" in cmd:
+                await commands.handle_xread(data_split, stream_store, writer)
+
             print("hello im dome")
             print(master_port, port, replica_port, cmd, WRITE_COMMANDS)
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
