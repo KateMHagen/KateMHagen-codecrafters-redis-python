@@ -184,8 +184,8 @@ async def handle_message(data, writer):
             elif "XREAD" in cmd:
                 await commands.handle_xread(data_split, stream_store, writer)
 
-            print("hello im dome")
-            print(master_port, port, replica_port, cmd, WRITE_COMMANDS)
+            print("I'm done in handle messages")
+            
             if master_port == port and replica_port and cmd in WRITE_COMMANDS:
                 print(" I WILL NOW PROPAGATE")
                 await propagate_commands(data)

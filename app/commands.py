@@ -414,57 +414,60 @@ async def handle_xrange(data, stream_store, writer):
     await writer.drain()
 
 async def handle_xread(data, stream_store, writer):
-    print("from handle xread")
+    print("from handle_xread")
     print(data)
-    stream_key = data[6]
-    
-    id = data[8]
 
-    matching_entries = []
-    
-    # Filter entries by start id
-    for entry in stream_store.entries[stream_key].entries:
-        entry_id = entry.id
-        
-        # Check if the entry is within the start and end range (inclusive)
-        if id < entry_id:
-            matching_entries.append(entry)
+    # If multiple streams
+    if len(data) > 10:
+        res = f"*2\r\n"
+    # If single stream
+    else:
+        res = f"*1\r\n"
 
-    # Add length matching entries
-    res = f"*{len(matching_entries)}\r\n"
-    res += f"*{len(stream_store.entries[stream_key].entries[0].__dict__)}\r\n"
-    res += f"${len(stream_key)}\r\n{stream_key}\r\n"
-    res += f"*{len(matching_entries)}\r\n"
-    res += f"*{len(stream_store.entries[stream_key].entries[0].__dict__)}\r\n"
-    
-    for entry in matching_entries:
+    stream_count = (len(data) - 6) // 2
+    n = 0
+    i = 0
+    # Loop through each stream and last ID
+    while i < stream_count:
+        if len(data) > 10:
+            stream_key = data[6 + n]
+            id = data[10 + n]
+            n = 2
+            i += 1
+        else:
+            stream_key = data[6]
+            id = data[8]
+            i = stream_count
         
-        # Add entry ID
-        res += f"${len(entry_id)}\r\n{entry.id}\r\n"
-        # Add the number of fields in "data"
-        res += f"*{len(entry.data) * 2}\r\n"  # Each key-value pair counts as 2 elements in RESP
-        
-        # Loop through the data dictionary of the current entry
-        for data_key, data_value in entry.data.items():
-            # Add the key
-            res += f"${len(data_key)}\r\n{data_key}\r\n"
-            # Add the value
-            res += f"${len(data_value)}\r\n{data_value}\r\n"
-        # Add length of data 
+        matching_entries = []
+        print(f'Processing key: {stream_key}, id: {id}')
+
+        # Check if the stream exists and filter entries by last ID
+        if stream_key in stream_store.entries:
+            for entry in stream_store.entries[stream_key].entries:
+                entry_id = entry.id
+                if id < entry.id:  # Match entries with IDs greater than last_id
+                    matching_entries.append(entry)
+
+        # Construct response for the current stream
+        res += f"*{len(stream_store.entries[stream_key].entries[0].__dict__)}\r\n"
+        res += f"${len(stream_key)}\r\n{stream_key}\r\n"
         res += f"*{len(matching_entries)}\r\n"
-   
-    print(f'this is res {res}')
+        res += f"*{len(stream_store.entries[stream_key].entries[0].__dict__)}\r\n"
+        
+        for entry in matching_entries:
+            # Add entry ID
+            res += f"${len(entry_id)}\r\n{entry.id}\r\n"
+            # Add the number of fields in "data"
+            res += f"*{len(entry.data) * 2}\r\n"  # Each key-value pair counts as 2 elements in RESP
+            # Loop through the data dictionary of the current entry
+            for data_key, data_value in entry.data.items():
+                # Add the key
+                res += f"${len(data_key)}\r\n{data_key}\r\n"
+                # Add the value
+                res += f"${len(data_value)}\r\n{data_value}\r\n"
+        
+    # Write the complete response
+    print(f'This is res: {res.encode()}')
     writer.write(res.encode())
     await writer.drain()
-
-# *1\r\n
-# *2\r\n
-# $8\r\nsome_key\r\n
-# *1\r\n
-# *2\r\n
-# $15\r\n1526985054079-0\r\n
-# *4\r\n
-# $11\r\ntemperature\r\n
-# $2\r\n37\r\n
-# $8\r\nhumidity\r\n
-# $2\r\n94\r\n
