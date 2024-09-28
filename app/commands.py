@@ -294,7 +294,6 @@ async def handle_xadd(data, stream_store, writer):
         if entry_id == "*":
             new_ms = round(time.time()*1000)
             new_seq = 0
-            
     else:
         new_ms, new_seq = entry_id.split('-')
         new_ms = int(new_ms)
@@ -349,6 +348,7 @@ async def handle_xadd(data, stream_store, writer):
         print('eyooo')
         new_entry = StreamEntry(entry_id, entry_data)
         await add_entry(new_entry, entry_id, stream_name, stream_store, writer)
+        
     
 
 async def add_entry(new_entry, entry_id, stream_name, stream_store, writer):
@@ -417,18 +417,62 @@ async def handle_xread(data, stream_store, writer):
     print("from handle_xread")
     print(data)
 
-    # If multiple streams
+    # Initialize response
     if len(data) > 10:
-        res = f"*2\r\n"
-    # If single stream
+        res = f"*2\r\n"  # Multiple streams
     else:
-        res = f"*1\r\n"
+        res = f"*1\r\n"  # Single stream
 
+    block = False  # Initialize block as False
+
+    new_entry = "ignore"
+    # Handle blocking
+    if "block" in data:
+        block = True
+        time_block = int(data[data.index("block") + 2]) / 1000
+        print("Sleeping for:", time_block)
+        initial_stream_state = {
+            stream_key: len(stream_entries.entries)
+            for stream_key, stream_entries in stream_store.entries.items()
+        }
+        await asyncio.sleep(time_block)  # Use await for non-blocking sleep
+        
+        print("Not sleeping anymore")
+        for stream_key, stream_entries in stream_store.entries.items():
+                if len(stream_entries.entries) > initial_stream_state[stream_key]:
+                    new_entry = "yes"
+                    break
+                else:
+                    new_entry = "no"
+                
+            
+                
+   
     stream_count = (len(data) - 6) // 2
     n = 0
     i = 0
+    
     # Loop through each stream and last ID
     while i < stream_count:
+        if block and new_entry:
+            for stream_key, stream_entries in stream_store.entries.items():
+                # Check if there are entries in the stream
+                if stream_entries.entries:
+                    last_entry = stream_entries.entries[-1]  # Accessing the last StreamEntry
+                    # Outputting the individual attributes
+                    print(f"Stream: {stream_key}")
+                    print(f"Last Entry ID: {last_entry.id}")  # Output the ID of the last entry
+                    print(f"Last Entry Data: {last_entry.data}")  # Output the data of the last entry
+                    
+                    for key, value in last_entry.data.items():
+                        print(f"{key}: {value}")  # Output each key-value pair
+                        key = key
+                        value = value
+                    res = f"*1\r\n*2\r\n${len(stream_key)}\r\n{stream_key}\r\n*1\r\n*2\r\n${len(last_entry.id)}\r\n{last_entry.id}\r\n*2\r\n${len(key)}\r\n{key}\r\n${len(value)}\r\n{value}\r\n"
+                   
+            break
+    
+        
         if len(data) > 10:
             stream_key = data[6 + n]
             id = data[10 + n]
@@ -440,7 +484,7 @@ async def handle_xread(data, stream_store, writer):
             i = stream_count
         
         matching_entries = []
-        print(f'Processing key: {stream_key}, id: {id}')
+        print(f'Processing key: {stream_key}, last ID: {id}')
 
         # Check if the stream exists and filter entries by last ID
         if stream_key in stream_store.entries:
@@ -449,12 +493,13 @@ async def handle_xread(data, stream_store, writer):
                 if id < entry.id:  # Match entries with IDs greater than last_id
                     matching_entries.append(entry)
 
-        # Construct response for the current stream
+         # Construct response for the current stream
         res += f"*{len(stream_store.entries[stream_key].entries[0].__dict__)}\r\n"
         res += f"${len(stream_key)}\r\n{stream_key}\r\n"
         res += f"*{len(matching_entries)}\r\n"
         res += f"*{len(stream_store.entries[stream_key].entries[0].__dict__)}\r\n"
-        
+
+
         for entry in matching_entries:
             # Add entry ID
             res += f"${len(entry_id)}\r\n{entry.id}\r\n"
@@ -466,7 +511,11 @@ async def handle_xread(data, stream_store, writer):
                 res += f"${len(data_key)}\r\n{data_key}\r\n"
                 # Add the value
                 res += f"${len(data_value)}\r\n{data_value}\r\n"
+
         
+    if new_entry == "no":
+        res = "$-1\r\n"  
+            
     # Write the complete response
     print(f'This is res: {res.encode()}')
     writer.write(res.encode())
